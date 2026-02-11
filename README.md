@@ -1,12 +1,20 @@
 
 <!-- @import "[TOC]" {cmd="toc" depthFrom=1 depthTo=6 orderedList=false} -->
-# CSV Variable Plotter Application
+# CSV Variable Plotter (Desktop)
 
-A native desktop app (Tkinter + Matplotlib) for plotting two variables from a CSV file with X-period data slicing.
+A native desktop app (Tkinter + Matplotlib) for plotting selected variables from one or multiple CSV files with X-period data slicing.
+
+## Download APP
+- [Download Latest APP (macOS .zip)](https://github.com/Hongze200532/CSV_Processing/releases/latest/download/CSV-Variable-Plotter-macOS.zip)
+- [All Releases](https://github.com/Hongze200532/CSV_Processing/releases)
 
 ## Features
-- Open any `.csv` file from your computer.
+- Open one or multiple `.csv` files from your computer.
 - Choose `X` and `Y` variables.
+- Choose plot mode:
+  - `Overlay (One Chart)` to draw all file sources in one chart
+  - `Separate Subplots` to draw each source in its own subplot
+- In overlay mode, legend labels indicate data source (file name).
 - Choose `X period` as a data slice (not a date):
   - `All`
   - `First 10%`
@@ -19,6 +27,8 @@ A native desktop app (Tkinter + Matplotlib) for plotting two variables from a CS
 - Plot a 2D line chart inside the app window.
 - Line mode supports smoothing (`Smooth line` + window size).
 - Supports one-click export via `Export Plot PNG` with configurable `Export DPI`.
+- Hover on line (overlay mode) to inspect nearest point data in the left panel.
+- Shows global peak values (max/min) with source labels.
 - Controls are on the left sidebar.
 - On macOS, when no plot is shown, the right side uses native frosted glass (`NSVisualEffectView`).
 
