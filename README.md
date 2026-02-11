@@ -1,6 +1,6 @@
 
 <!-- @import "[TOC]" {cmd="toc" depthFrom=1 depthTo=6 orderedList=false} -->
-# CSV Variable Plotter (Desktop)
+# CSV Variable Plotter Application
 
 A native desktop app (Tkinter + Matplotlib) for plotting two variables from a CSV file with X-period data slicing.
 
