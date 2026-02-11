@@ -1,4 +1,4 @@
-# CSV Variable Plotter (Desktop)
+# CSV Variable Plotter 
 
 A native desktop application built with **Tkinter + Matplotlib** for loading CSV data, selecting variables, and generating 2D comparison plots.
 
