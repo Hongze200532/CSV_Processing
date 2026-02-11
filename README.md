@@ -12,6 +12,8 @@ A native desktop app (Tkinter + Matplotlib) for plotting two variables from a CS
   - `Middle 50%`
   - `Last 25%`
   - `Last 10%`
+- Or choose `Manual Range` and enter `Start X` / `End X`.
+  - If Start/End values are not exact matches in CSV, the app rounds to the nearest existing X values.
 - Plot a 2D line or scatter chart inside the app window.
 - Controls are on the left sidebar.
 - On macOS, when no plot is shown, the right side uses native frosted glass (`NSVisualEffectView`).

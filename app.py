@@ -32,7 +32,7 @@ class CSVPlotterApp(tk.Tk):
         "Last 25%": (0.75, 1.00),
         "Last 10%": (0.90, 1.00),
     }
-    X_PERIOD_OPTIONS = ["All", *PERIOD_TO_SLICE.keys()]
+    X_PERIOD_OPTIONS = ["All", *PERIOD_TO_SLICE.keys(), "Manual Range"]
 
     def __init__(self) -> None:
         super().__init__()
@@ -49,6 +49,8 @@ class CSVPlotterApp(tk.Tk):
         self.x_var = tk.StringVar()
         self.y_var = tk.StringVar()
         self.x_period_var = tk.StringVar(value="All")
+        self.manual_start_var = tk.StringVar()
+        self.manual_end_var = tk.StringVar()
         self.chart_type_var = tk.StringVar(value="Line")
         self.status_var = tk.StringVar(value="Select a CSV file to begin.")
 
@@ -62,7 +64,7 @@ class CSVPlotterApp(tk.Tk):
         controls.pack(side=tk.LEFT, fill=tk.Y)
         controls.pack_propagate(False)
         controls.grid_columnconfigure(0, weight=1)
-        controls.grid_rowconfigure(10, weight=1)
+        controls.grid_rowconfigure(14, weight=1)
 
         ttk.Button(controls, text="Choose CSV", command=self.load_csv).grid(
             row=0, column=0, sticky="ew", pady=(0, 10)
@@ -91,22 +93,31 @@ class CSVPlotterApp(tk.Tk):
             values=self.X_PERIOD_OPTIONS,
         )
         self.x_period_combo.grid(row=8, column=0, sticky="ew", pady=(2, 10))
+        self.x_period_combo.bind("<<ComboboxSelected>>", self.on_x_period_change)
 
-        ttk.Label(controls, text="Chart").grid(row=9, column=0, sticky="w")
+        ttk.Label(controls, text="Start X (manual)").grid(row=9, column=0, sticky="w")
+        self.manual_start_entry = ttk.Entry(controls, textvariable=self.manual_start_var, state="disabled")
+        self.manual_start_entry.grid(row=10, column=0, sticky="ew", pady=(2, 10))
+
+        ttk.Label(controls, text="End X (manual)").grid(row=11, column=0, sticky="w")
+        self.manual_end_entry = ttk.Entry(controls, textvariable=self.manual_end_var, state="disabled")
+        self.manual_end_entry.grid(row=12, column=0, sticky="ew", pady=(2, 10))
+
+        ttk.Label(controls, text="Chart").grid(row=13, column=0, sticky="w")
         self.chart_combo = ttk.Combobox(
             controls,
             textvariable=self.chart_type_var,
             state="readonly",
             values=["Line", "Scatter"],
         )
-        self.chart_combo.grid(row=10, column=0, sticky="ew", pady=(2, 10))
+        self.chart_combo.grid(row=14, column=0, sticky="ew", pady=(2, 10))
 
         ttk.Button(controls, text="Plot", command=self.plot_data).grid(
-            row=11, column=0, sticky="ew", pady=(6, 10)
+            row=15, column=0, sticky="ew", pady=(6, 10)
         )
 
         ttk.Label(controls, textvariable=self.status_var, wraplength=260, justify="left").grid(
-            row=12, column=0, sticky="sw"
+            row=16, column=0, sticky="sw"
         )
 
         self.right_panel = tk.Frame(main, bg="#efefef")
@@ -229,6 +240,73 @@ class CSVPlotterApp(tk.Tk):
             stipple="gray25",
         )
 
+    def on_x_period_change(self, _event: tk.Event | None = None) -> None:
+        manual_mode = self.x_period_var.get() == "Manual Range"
+        entry_state = "normal" if manual_mode else "disabled"
+        self.manual_start_entry.configure(state=entry_state)
+        self.manual_end_entry.configure(state=entry_state)
+        if not manual_mode:
+            self.manual_start_var.set("")
+            self.manual_end_var.set("")
+
+    def _nearest_numeric(self, values: pd.Series, target: float) -> float:
+        nearest_idx = (values - target).abs().idxmin()
+        return float(values.loc[nearest_idx])
+
+    def _nearest_datetime(self, values: pd.Series, target: pd.Timestamp) -> pd.Timestamp:
+        nearest_idx = (values - target).abs().idxmin()
+        return pd.Timestamp(values.loc[nearest_idx])
+
+    def _apply_manual_x_range(self, data: pd.DataFrame, x_col: str) -> tuple[pd.DataFrame, str]:
+        start_raw = self.manual_start_var.get().strip()
+        end_raw = self.manual_end_var.get().strip()
+        if not start_raw or not end_raw:
+            raise ValueError("Manual Range requires both Start X and End X.")
+
+        x_series = data[x_col]
+
+        # Prefer numeric interpretation when feasible.
+        x_numeric = pd.to_numeric(x_series, errors="coerce")
+        numeric_ratio = x_numeric.notna().mean() if len(x_numeric) else 0.0
+        if numeric_ratio >= 0.8:
+            start_num = pd.to_numeric(pd.Series([start_raw.replace(",", "")]), errors="coerce").iloc[0]
+            end_num = pd.to_numeric(pd.Series([end_raw.replace(",", "")]), errors="coerce").iloc[0]
+            if pd.isna(start_num) or pd.isna(end_num):
+                raise ValueError("X is numeric. Please input numeric Start X and End X.")
+
+            valid_numeric = x_numeric.dropna()
+            if valid_numeric.empty:
+                raise ValueError("Selected X variable has no numeric values.")
+
+            start_nearest = self._nearest_numeric(valid_numeric, float(start_num))
+            end_nearest = self._nearest_numeric(valid_numeric, float(end_num))
+            low, high = sorted((start_nearest, end_nearest))
+            filtered = data.loc[x_numeric.between(low, high)].copy()
+            return filtered, f"X period: Manual [{low:g}, {high:g}]"
+
+        x_datetime = pd.to_datetime(x_series, errors="coerce")
+        datetime_ratio = x_datetime.notna().mean() if len(x_datetime) else 0.0
+        if datetime_ratio >= 0.8:
+            start_dt = pd.to_datetime(start_raw, errors="coerce")
+            end_dt = pd.to_datetime(end_raw, errors="coerce")
+            if pd.isna(start_dt) or pd.isna(end_dt):
+                raise ValueError("X is datetime-like. Please use parseable date/time input.")
+
+            valid_datetime = x_datetime.dropna()
+            if valid_datetime.empty:
+                raise ValueError("Selected X variable has no datetime values.")
+
+            start_nearest = self._nearest_datetime(valid_datetime, pd.Timestamp(start_dt))
+            end_nearest = self._nearest_datetime(valid_datetime, pd.Timestamp(end_dt))
+            low_dt, high_dt = sorted((start_nearest, end_nearest))
+            filtered = data.loc[x_datetime.between(low_dt, high_dt)].copy()
+            return (
+                filtered,
+                f"X period: Manual [{low_dt.strftime('%Y-%m-%d %H:%M:%S')}, {high_dt.strftime('%Y-%m-%d %H:%M:%S')}]",
+            )
+
+        raise ValueError("Manual Range supports numeric or datetime-like X variable only.")
+
     def load_csv(self) -> None:
         file_path = filedialog.askopenfilename(
             title="Select CSV file",
@@ -264,6 +342,9 @@ class CSVPlotterApp(tk.Tk):
         self.x_var.set(columns[0])
         self.y_var.set(columns[1] if len(columns) > 1 else columns[0])
         self.x_period_var.set("All")
+        self.manual_start_var.set("")
+        self.manual_end_var.set("")
+        self.on_x_period_change()
         self.has_plot = False
         self.show_blur_overlay()
 
@@ -284,7 +365,8 @@ class CSVPlotterApp(tk.Tk):
 
         filtered_df = self.df.copy()
         x_period = self.x_period_var.get()
-        if x_period != "All":
+        period_note = f"X period: {x_period}"
+        if x_period in self.PERIOD_TO_SLICE:
             total_rows = len(filtered_df)
             start_ratio, end_ratio = self.PERIOD_TO_SLICE[x_period]
             start_idx = int(total_rows * start_ratio)
@@ -296,6 +378,12 @@ class CSVPlotterApp(tk.Tk):
             filtered_df = filtered_df.iloc[start_idx:end_idx].copy()
             if filtered_df.empty:
                 messagebox.showwarning("No rows", "Selected X period slice has no data.")
+                return
+        elif x_period == "Manual Range":
+            try:
+                filtered_df, period_note = self._apply_manual_x_range(filtered_df, x_col)
+            except ValueError as exc:
+                messagebox.showwarning("Invalid manual range", str(exc))
                 return
 
         if filtered_df.empty:
@@ -333,7 +421,7 @@ class CSVPlotterApp(tk.Tk):
 
         self._update_preview(filtered_df.head(20))
         self.status_var.set(
-            f"Plotted {len(plot_df)} points from {len(filtered_df)} rows (X period: {x_period})."
+            f"Plotted {len(plot_df)} points from {len(filtered_df)} rows ({period_note})."
         )
 
     def _update_preview(self, df_head: pd.DataFrame) -> None:
