@@ -1,4 +1,5 @@
 import io
+import math
 from pathlib import Path
 import sys
 import importlib.util
@@ -54,7 +55,7 @@ class CSVPlotterApp(tk.Tk):
         self.title("CSV Variable Plotter (Desktop)")
         self.geometry("1400x860")
 
-        self.df: pd.DataFrame | None = None
+        self.data_frames: dict[str, pd.DataFrame] = {}
         self.blur_overlay: tk.Canvas | None = None
         self.has_plot = False
         self.right_panel: tk.Frame | None = None
@@ -64,6 +65,7 @@ class CSVPlotterApp(tk.Tk):
         self.x_var = tk.StringVar()
         self.y_var = tk.StringVar()
         self.x_period_var = tk.StringVar(value="All")
+        self.plot_mode_var = tk.StringVar(value="Overlay (One Chart)")
         self.manual_start_var = tk.StringVar()
         self.manual_end_var = tk.StringVar()
         self.smooth_line_var = tk.BooleanVar(value=True)
@@ -76,9 +78,9 @@ class CSVPlotterApp(tk.Tk):
 
         self.current_plot_x_col = ""
         self.current_plot_y_col = ""
-        self.current_plot_x_series: pd.Series | None = None
-        self.current_plot_y_series: pd.Series | None = None
-        self.current_plot_valid_idx: np.ndarray | None = None
+        self.current_plot_sources: list[str] = []
+        self.current_plot_x_values: list = []
+        self.current_plot_y_values: list = []
         self.current_plot_xy_pixels: np.ndarray | None = None
         self.hover_snap_px = 14.0
 
@@ -94,7 +96,7 @@ class CSVPlotterApp(tk.Tk):
         controls.grid_columnconfigure(0, weight=1)
         controls.grid_rowconfigure(30, weight=1)
 
-        ttk.Button(controls, text="Choose CSV", command=self.load_csv).grid(
+        ttk.Button(controls, text="Choose CSV(s)", command=self.load_csv).grid(
             row=0, column=0, sticky="ew", pady=(0, 10)
         )
         ttk.Label(controls, text="File").grid(row=1, column=0, sticky="w")
@@ -131,27 +133,34 @@ class CSVPlotterApp(tk.Tk):
         self.manual_end_entry = ttk.Entry(controls, textvariable=self.manual_end_var, state="disabled")
         self.manual_end_entry.grid(row=12, column=0, sticky="ew", pady=(2, 10))
 
-        ttk.Label(controls, text="Chart: Line").grid(row=13, column=0, sticky="w", pady=(0, 10))
+        ttk.Label(controls, text="Plot mode").grid(row=13, column=0, sticky="w")
+        self.plot_mode_combo = ttk.Combobox(
+            controls,
+            textvariable=self.plot_mode_var,
+            state="readonly",
+            values=["Overlay (One Chart)", "Separate Subplots"],
+        )
+        self.plot_mode_combo.grid(row=14, column=0, sticky="ew", pady=(2, 10))
 
         ttk.Checkbutton(
             controls,
             text="Smooth line",
             variable=self.smooth_line_var,
-        ).grid(row=14, column=0, sticky="w")
+        ).grid(row=15, column=0, sticky="w")
         ttk.Entry(controls, textvariable=self.smooth_window_var).grid(
-            row=15, column=0, sticky="ew", pady=(2, 10)
+            row=16, column=0, sticky="ew", pady=(2, 10)
         )
 
-        ttk.Label(controls, text="Export DPI").grid(row=16, column=0, sticky="w")
+        ttk.Label(controls, text="Export DPI").grid(row=17, column=0, sticky="w")
         ttk.Entry(controls, textvariable=self.export_dpi_var).grid(
-            row=17, column=0, sticky="ew", pady=(2, 10)
+            row=18, column=0, sticky="ew", pady=(2, 10)
         )
 
         ttk.Button(controls, text="Plot", command=self.plot_data).grid(
-            row=18, column=0, sticky="ew", pady=(6, 6)
+            row=19, column=0, sticky="ew", pady=(6, 6)
         )
         ttk.Button(controls, text="Export Plot PNG", command=self.export_plot).grid(
-            row=19, column=0, sticky="ew", pady=(0, 10)
+            row=20, column=0, sticky="ew", pady=(0, 10)
         )
 
         ttk.Label(controls, textvariable=self.status_var, wraplength=260, justify="left").grid(
@@ -390,9 +399,9 @@ class CSVPlotterApp(tk.Tk):
         self.peak_min_var.set("Min: --")
         self.current_plot_x_col = ""
         self.current_plot_y_col = ""
-        self.current_plot_x_series = None
-        self.current_plot_y_series = None
-        self.current_plot_valid_idx = None
+        self.current_plot_sources = []
+        self.current_plot_x_values = []
+        self.current_plot_y_values = []
         self.current_plot_xy_pixels = None
 
     def _format_axis_value(self, value) -> str:
@@ -407,26 +416,50 @@ class CSVPlotterApp(tk.Tk):
             return f"{value:.6g}"
         return str(value)
 
-    def _update_peak_info(self, x_series: pd.Series, y_series: pd.Series) -> None:
-        y_numeric = pd.to_numeric(y_series, errors="coerce")
-        valid = y_numeric.notna()
-        if valid.sum() == 0:
+    def _update_peak_info_multi(self, plotted_series: list[dict], x_col: str, y_col: str) -> None:
+        max_info = None
+        min_info = None
+        for item in plotted_series:
+            x_series = item["x"]
+            y_series = item["y"]
+            source = item["source"]
+            y_numeric = pd.to_numeric(y_series, errors="coerce")
+            valid = y_numeric.notna()
+            if valid.sum() == 0:
+                continue
+
+            x_valid = x_series.loc[valid].reset_index(drop=True)
+            y_valid = y_numeric.loc[valid].reset_index(drop=True)
+            local_max_idx = int(y_valid.idxmax())
+            local_min_idx = int(y_valid.idxmin())
+
+            local_max = (float(y_valid.iloc[local_max_idx]), source, x_valid.iloc[local_max_idx], y_valid.iloc[local_max_idx])
+            local_min = (float(y_valid.iloc[local_min_idx]), source, x_valid.iloc[local_min_idx], y_valid.iloc[local_min_idx])
+            if max_info is None or local_max[0] > max_info[0]:
+                max_info = local_max
+            if min_info is None or local_min[0] < min_info[0]:
+                min_info = local_min
+
+        if max_info is None or min_info is None:
             self.peak_max_var.set("Max: --")
             self.peak_min_var.set("Min: --")
             return
 
-        y_valid = y_numeric.loc[valid].reset_index(drop=True)
-        x_valid = x_series.loc[valid].reset_index(drop=True)
-        max_idx = int(y_valid.idxmax())
-        min_idx = int(y_valid.idxmin())
         self.peak_max_var.set(
-            f"Max: X={self._format_axis_value(x_valid.iloc[max_idx])}, Y={self._format_axis_value(y_valid.iloc[max_idx])}"
+            f"Max[{max_info[1]}]: {x_col}={self._format_axis_value(max_info[2])}, {y_col}={self._format_axis_value(max_info[3])}"
         )
         self.peak_min_var.set(
-            f"Min: X={self._format_axis_value(x_valid.iloc[min_idx])}, Y={self._format_axis_value(y_valid.iloc[min_idx])}"
+            f"Min[{min_info[1]}]: {x_col}={self._format_axis_value(min_info[2])}, {y_col}={self._format_axis_value(min_info[3])}"
         )
 
-    def _update_hover_cache(self, x_series: pd.Series, y_series: pd.Series, x_col: str, y_col: str) -> None:
+    def _update_hover_cache(
+        self,
+        x_series: pd.Series,
+        y_series: pd.Series,
+        x_col: str,
+        y_col: str,
+        source_values: list[str] | None = None,
+    ) -> None:
         x_num = pd.to_numeric(x_series, errors="coerce")
         if x_num.notna().mean() < 0.8:
             x_dt = pd.to_datetime(x_series, errors="coerce")
@@ -436,19 +469,23 @@ class CSVPlotterApp(tk.Tk):
         y_num = pd.to_numeric(y_series, errors="coerce")
         valid = x_num.notna() & y_num.notna()
         if valid.sum() == 0:
-            self.current_plot_x_series = None
-            self.current_plot_y_series = None
-            self.current_plot_valid_idx = None
             self.current_plot_xy_pixels = None
+            self.current_plot_sources = []
+            self.current_plot_x_values = []
+            self.current_plot_y_values = []
             return
 
         x_valid_num = x_num.loc[valid].to_numpy(dtype=float)
         y_valid_num = y_num.loc[valid].to_numpy(dtype=float)
         xy = np.column_stack([x_valid_num, y_valid_num])
         self.current_plot_xy_pixels = self.ax.transData.transform(xy)
-        self.current_plot_valid_idx = np.flatnonzero(valid.to_numpy())
-        self.current_plot_x_series = x_series.reset_index(drop=True)
-        self.current_plot_y_series = y_series.reset_index(drop=True)
+        self.current_plot_x_values = list(x_series.loc[valid].reset_index(drop=True))
+        self.current_plot_y_values = list(y_series.loc[valid].reset_index(drop=True))
+        if source_values is None:
+            self.current_plot_sources = [""] * len(self.current_plot_x_values)
+        else:
+            source_arr = pd.Series(source_values)
+            self.current_plot_sources = list(source_arr.loc[valid].reset_index(drop=True).astype(str))
         self.current_plot_x_col = x_col
         self.current_plot_y_col = y_col
 
@@ -457,9 +494,8 @@ class CSVPlotterApp(tk.Tk):
             event is None
             or event.inaxes != self.ax
             or self.current_plot_xy_pixels is None
-            or self.current_plot_valid_idx is None
-            or self.current_plot_x_series is None
-            or self.current_plot_y_series is None
+            or not self.current_plot_x_values
+            or not self.current_plot_y_values
             or event.x is None
             or event.y is None
         ):
@@ -473,11 +509,12 @@ class CSVPlotterApp(tk.Tk):
             self.hover_point_var.set("X: -- | Y: --")
             return
 
-        src_idx = int(self.current_plot_valid_idx[nearest_i])
-        x_value = self.current_plot_x_series.iloc[src_idx]
-        y_value = self.current_plot_y_series.iloc[src_idx]
+        x_value = self.current_plot_x_values[nearest_i]
+        y_value = self.current_plot_y_values[nearest_i]
+        source = self.current_plot_sources[nearest_i] if nearest_i < len(self.current_plot_sources) else ""
+        src_prefix = f"[{source}] " if source else ""
         self.hover_point_var.set(
-            f"{self.current_plot_x_col}: {self._format_axis_value(x_value)} | "
+            f"{src_prefix}{self.current_plot_x_col}: {self._format_axis_value(x_value)} | "
             f"{self.current_plot_y_col}: {self._format_axis_value(y_value)}"
         )
 
@@ -513,39 +550,61 @@ class CSVPlotterApp(tk.Tk):
         self.status_var.set(f"Saved plot: {out_path} (DPI: {dpi})")
 
     def load_csv(self) -> None:
-        file_path = filedialog.askopenfilename(
-            title="Select CSV file",
+        file_paths = filedialog.askopenfilenames(
+            title="Select CSV file(s)",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
         )
-        if not file_path:
+        if not file_paths:
             return
 
-        path_obj = Path(file_path)
-        if not path_obj.exists() or path_obj.stat().st_size == 0:
-            messagebox.showwarning("Invalid file", "Selected file is empty or unavailable.")
+        loaded_frames: dict[str, pd.DataFrame] = {}
+        failed_files: list[str] = []
+        for file_path in file_paths:
+            path_obj = Path(file_path)
+            if not path_obj.exists() or path_obj.stat().st_size == 0:
+                failed_files.append(path_obj.name)
+                continue
+
+            raw_bytes = path_obj.read_bytes()
+            if not raw_bytes.strip():
+                failed_files.append(path_obj.name)
+                continue
+
+            csv_text = raw_bytes.decode("utf-8", errors="replace")
+            df = pd.read_csv(io.StringIO(csv_text), on_bad_lines="skip")
+            if df.empty:
+                failed_files.append(path_obj.name)
+                continue
+
+            df.columns = [str(col).strip() for col in df.columns]
+            loaded_frames[path_obj.name] = df
+
+        if not loaded_frames:
+            messagebox.showwarning("No data", "No valid CSV files were loaded.")
             return
 
-        raw_bytes = path_obj.read_bytes()
-        if not raw_bytes.strip():
-            messagebox.showwarning("Invalid file", "Selected file has no content.")
+        self.data_frames = loaded_frames
+        first_name = next(iter(self.data_frames))
+        first_df = self.data_frames[first_name]
+        common_cols = set(first_df.columns)
+        for frame in self.data_frames.values():
+            common_cols &= set(frame.columns)
+
+        columns = [c for c in first_df.columns if c in common_cols]
+        if len(columns) < 2:
+            messagebox.showwarning(
+                "Column mismatch",
+                "Loaded files do not share enough common columns for X/Y plotting.",
+            )
             return
 
-        csv_text = raw_bytes.decode("utf-8", errors="replace")
-        df = pd.read_csv(io.StringIO(csv_text), on_bad_lines="skip")
-
-        if df.empty:
-            messagebox.showwarning("No data", "CSV contains no readable rows.")
-            return
-
-        df.columns = [str(col).strip() for col in df.columns]
-        self.df = df
-
-        columns = self.df.columns.tolist()
         self.x_combo["values"] = columns
         self.y_combo["values"] = columns
 
-        self.x_var.set(columns[0])
-        self.y_var.set(columns[1] if len(columns) > 1 else columns[0])
+        self.x_var.set(columns[0] if self.x_var.get() not in columns else self.x_var.get())
+        self.y_var.set(columns[1] if self.y_var.get() not in columns and len(columns) > 1 else (self.y_var.get() or columns[0]))
+        if self.y_var.get() not in columns:
+            self.y_var.set(columns[1] if len(columns) > 1 else columns[0])
         self.x_period_var.set("All")
         self.manual_start_var.set("")
         self.manual_end_var.set("")
@@ -554,13 +613,22 @@ class CSVPlotterApp(tk.Tk):
         self._clear_plot_insights()
         self.show_blur_overlay()
 
-        self.file_path_var.set(file_path)
-        self._update_preview(self.df.head(20))
-        self.status_var.set(f"Loaded {len(self.df)} rows and {len(columns)} columns.")
+        if len(self.data_frames) == 1:
+            self.file_path_var.set(next(iter(self.data_frames)))
+        else:
+            head_names = list(self.data_frames.keys())[:3]
+            suffix = f" ... (+{len(self.data_frames)-3} more)" if len(self.data_frames) > 3 else ""
+            self.file_path_var.set(f"{len(self.data_frames)} files: {', '.join(head_names)}{suffix}")
+
+        self._update_preview(first_df.head(20))
+        failed_note = f" | skipped: {', '.join(failed_files)}" if failed_files else ""
+        self.status_var.set(
+            f"Loaded {len(self.data_frames)} file(s), common columns: {len(columns)}{failed_note}"
+        )
 
     def plot_data(self) -> None:
-        if self.df is None:
-            messagebox.showinfo("No data", "Load a CSV file first.")
+        if not self.data_frames:
+            messagebox.showinfo("No data", "Load CSV file(s) first.")
             return
 
         x_col = self.x_var.get().strip()
@@ -569,87 +637,151 @@ class CSVPlotterApp(tk.Tk):
             messagebox.showwarning("Missing selection", "Choose X and Y variables.")
             return
 
-        filtered_df = self.df.copy()
         x_period = self.x_period_var.get()
-        period_note = f"X period: {x_period}"
-        if x_period in self.PERIOD_TO_SLICE:
-            total_rows = len(filtered_df)
-            start_ratio, end_ratio = self.PERIOD_TO_SLICE[x_period]
-            start_idx = int(total_rows * start_ratio)
-            end_idx = int(total_rows * end_ratio)
-            if end_idx <= start_idx:
-                end_idx = start_idx + 1
-            end_idx = min(end_idx, total_rows)
+        prepared: list[dict] = []
+        skipped_sources: list[str] = []
 
-            filtered_df = filtered_df.iloc[start_idx:end_idx].copy()
+        for source, frame in self.data_frames.items():
+            if x_col not in frame.columns or y_col not in frame.columns:
+                skipped_sources.append(source)
+                continue
+
+            filtered_df = frame.copy()
+            if x_period in self.PERIOD_TO_SLICE:
+                total_rows = len(filtered_df)
+                start_ratio, end_ratio = self.PERIOD_TO_SLICE[x_period]
+                start_idx = int(total_rows * start_ratio)
+                end_idx = int(total_rows * end_ratio)
+                if end_idx <= start_idx:
+                    end_idx = start_idx + 1
+                end_idx = min(end_idx, total_rows)
+                filtered_df = filtered_df.iloc[start_idx:end_idx].copy()
+            elif x_period == "Manual Range":
+                try:
+                    filtered_df, _ = self._apply_manual_x_range(filtered_df, x_col)
+                except ValueError:
+                    skipped_sources.append(source)
+                    continue
+
             if filtered_df.empty:
-                messagebox.showwarning("No rows", "Selected X period slice has no data.")
-                return
-        elif x_period == "Manual Range":
-            try:
-                filtered_df, period_note = self._apply_manual_x_range(filtered_df, x_col)
-            except ValueError as exc:
-                messagebox.showwarning("Invalid manual range", str(exc))
-                return
+                skipped_sources.append(source)
+                continue
 
-        if filtered_df.empty:
-            messagebox.showwarning("No rows", "No rows match the selected X period.")
-            return
+            filtered_df[y_col] = pd.to_numeric(filtered_df[y_col], errors="coerce")
+            if self._should_parse_x_as_datetime(filtered_df[x_col]):
+                parsed_x = pd.to_datetime(filtered_df[x_col], errors="coerce")
+                if parsed_x.notna().mean() >= 0.8:
+                    filtered_df[x_col] = parsed_x
+            else:
+                x_numeric = pd.to_numeric(filtered_df[x_col], errors="coerce")
+                if x_numeric.notna().mean() >= 0.8:
+                    filtered_df[x_col] = x_numeric
 
-        filtered_df[y_col] = pd.to_numeric(filtered_df[y_col], errors="coerce")
-        if self._should_parse_x_as_datetime(filtered_df[x_col]):
-            parsed_x = pd.to_datetime(filtered_df[x_col], errors="coerce")
-            x_parse_ratio = parsed_x.notna().mean() if len(parsed_x) else 0.0
-            if x_parse_ratio >= 0.8:
-                filtered_df[x_col] = parsed_x
-        else:
-            x_numeric = pd.to_numeric(filtered_df[x_col], errors="coerce")
-            x_numeric_ratio = x_numeric.notna().mean() if len(x_numeric) else 0.0
-            if x_numeric_ratio >= 0.8:
-                filtered_df[x_col] = x_numeric
+            plot_df = filtered_df[[x_col, y_col]].dropna()
+            if plot_df.empty:
+                skipped_sources.append(source)
+                continue
 
-        plot_df = filtered_df[[x_col, y_col]].dropna()
-        if plot_df.empty:
-            messagebox.showwarning(
-                "No valid data",
-                "No valid points remain after filtering and numeric conversion.",
+            plot_df = plot_df.sort_values(x_col).reset_index(drop=True)
+            y_plot = plot_df[y_col].copy()
+            if self.smooth_line_var.get() and len(plot_df) >= 3:
+                smooth_window = self._get_smooth_window(len(plot_df))
+                if smooth_window >= 2:
+                    y_plot = y_plot.rolling(window=smooth_window, center=True, min_periods=1).mean()
+
+            prepared.append(
+                {
+                    "source": source,
+                    "x": plot_df[x_col].reset_index(drop=True),
+                    "y": y_plot.reset_index(drop=True),
+                    "rows": len(plot_df),
+                    "preview": filtered_df.head(20),
+                }
             )
+
+        if not prepared:
+            messagebox.showwarning("No valid data", "No plot-ready data found for selected variables.")
             return
 
-        self.ax.clear()
-        plot_df = plot_df.sort_values(x_col).reset_index(drop=True)
-        y_plot = plot_df[y_col].copy()
-        if self.smooth_line_var.get() and len(plot_df) >= 3:
-            smooth_window = self._get_smooth_window(len(plot_df))
-            if smooth_window >= 2:
-                y_plot = y_plot.rolling(window=smooth_window, center=True, min_periods=1).mean()
+        self.fig.clf()
+        mode = self.plot_mode_var.get()
+        colors = plt.cm.tab20(np.linspace(0, 1, max(len(prepared), 2)))
+        total_points = int(sum(item["rows"] for item in prepared))
 
-        self.ax.plot(
-            plot_df[x_col],
-            y_plot,
-            linewidth=0.85,
-            antialiased=True,
-            color="#1f77b4",
-            solid_capstyle="round",
-            solid_joinstyle="round",
-        )
+        if mode == "Separate Subplots":
+            cols = 2 if len(prepared) > 1 else 1
+            rows = math.ceil(len(prepared) / cols)
+            axes = self.fig.subplots(rows, cols, squeeze=False)
+            flat_axes = [ax for row_axes in axes for ax in row_axes]
+            for i, item in enumerate(prepared):
+                ax_i = flat_axes[i]
+                ax_i.plot(
+                    item["x"],
+                    item["y"],
+                    linewidth=0.75,
+                    antialiased=True,
+                    color=colors[i % len(colors)],
+                    solid_capstyle="round",
+                    solid_joinstyle="round",
+                )
+                ax_i.set_title(item["source"], fontsize=5)
+                ax_i.set_xlabel(x_col, fontsize=4.5)
+                ax_i.set_ylabel(y_col, fontsize=4.5)
+                ax_i.tick_params(axis="both", labelsize=4)
+                ax_i.grid(True, alpha=0.28, linestyle="-", linewidth=0.6)
+                ax_i.margins(x=0.02, y=0.08)
+            for j in range(len(prepared), len(flat_axes)):
+                flat_axes[j].set_visible(False)
+            self.ax = flat_axes[0]
+            self.canvas.draw()
+            self._clear_plot_insights()
+            self.hover_point_var.set("Hover data: available in Overlay mode")
+        else:
+            self.ax = self.fig.add_subplot(111)
+            hover_x_list: list[pd.Series] = []
+            hover_y_list: list[pd.Series] = []
+            hover_src_list: list[str] = []
+            for i, item in enumerate(prepared):
+                self.ax.plot(
+                    item["x"],
+                    item["y"],
+                    linewidth=0.75,
+                    antialiased=True,
+                    color=colors[i % len(colors)],
+                    solid_capstyle="round",
+                    solid_joinstyle="round",
+                    label=item["source"],
+                )
+                hover_x_list.append(item["x"])
+                hover_y_list.append(item["y"])
+                hover_src_list.extend([item["source"]] * len(item["x"]))
 
-        self.ax.set_xlabel(x_col, fontsize=4.5)
-        self.ax.set_ylabel(y_col, fontsize=4.5)
-        self.ax.set_title(f"{y_col} vs {x_col}", fontsize=5)
-        self.ax.tick_params(axis="both", labelsize=4)
-        self.ax.grid(True, alpha=0.28, linestyle="-", linewidth=0.7)
-        self.ax.margins(x=0.02, y=0.08)
-        self.fig.autofmt_xdate()
-        self._update_peak_info(plot_df[x_col], y_plot)
-        self.canvas.draw()
-        self._update_hover_cache(plot_df[x_col], y_plot, x_col, y_col)
+            self.ax.set_xlabel(x_col, fontsize=4.5)
+            self.ax.set_ylabel(y_col, fontsize=4.5)
+            self.ax.set_title(f"{y_col} vs {x_col}", fontsize=5)
+            self.ax.tick_params(axis="both", labelsize=4)
+            self.ax.grid(True, alpha=0.28, linestyle="-", linewidth=0.7)
+            self.ax.margins(x=0.02, y=0.08)
+            if len(prepared) > 1:
+                self.ax.legend(loc="best", fontsize=4, title="Source", title_fontsize=4.2)
+            self.fig.autofmt_xdate()
+            self.canvas.draw()
+            self._update_hover_cache(
+                pd.concat(hover_x_list, ignore_index=True),
+                pd.concat(hover_y_list, ignore_index=True),
+                x_col,
+                y_col,
+                source_values=hover_src_list,
+            )
+
+        self._update_peak_info_multi(prepared, x_col, y_col)
         self.has_plot = True
         self.hide_blur_overlay()
 
-        self._update_preview(filtered_df.head(20))
+        self._update_preview(prepared[0]["preview"])
+        skipped_note = f" | skipped: {len(skipped_sources)}" if skipped_sources else ""
         self.status_var.set(
-            f"Plotted {len(plot_df)} points from {len(filtered_df)} rows ({period_note})."
+            f"Mode: {mode} | files plotted: {len(prepared)} | points: {total_points}{skipped_note} | X period: {x_period}"
         )
 
     def _update_preview(self, df_head: pd.DataFrame) -> None:
