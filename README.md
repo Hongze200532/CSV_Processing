@@ -13,7 +13,8 @@ A native desktop app (Tkinter + Matplotlib) for plotting two variables from a CS
   - `Last 25%`
   - `Last 10%`
 - Plot a 2D line or scatter chart inside the app window.
-- Controls are on the left sidebar; the non-control area uses a blur-style overlay.
+- Controls are on the left sidebar.
+- On macOS, when no plot is shown, the right side uses native frosted glass (`NSVisualEffectView`).
 
 ## Setup
 ```bash
@@ -31,3 +32,4 @@ python3 app.py
 ## Notes
 - `Tkinter` is part of standard Python on most macOS installs.
 - X-period now slices the loaded rows by position, not by specific date values.
+- For native macOS frosted glass, install dependencies from `requirements.txt` (includes `pyobjc-framework-Cocoa` on macOS).

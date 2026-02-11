@@ -130,6 +130,7 @@ class CSVPlotterApp(tk.Tk):
 
         if HAS_COCOA:
             self.bind("<Configure>", self._sync_blur_overlay)
+            self.right_panel.bind("<Configure>", self._sync_blur_overlay)
             self.after(120, self._ensure_native_blur_overlay)
         else:
             # Fallback blur-like layer for non-macOS environments.
