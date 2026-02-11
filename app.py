@@ -25,6 +25,7 @@ class CSVPlotterApp(tk.Tk):
 
         self.df: pd.DataFrame | None = None
         self.blur_overlay: tk.Canvas | None = None
+        self.has_plot = False
 
         self.file_path_var = tk.StringVar(value="No file selected")
         self.x_var = tk.StringVar()
@@ -119,6 +120,18 @@ class CSVPlotterApp(tk.Tk):
         self.blur_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
         self.blur_overlay.bind("<Configure>", self._redraw_blur_overlay)
         self._redraw_blur_overlay()
+        self.show_blur_overlay()
+
+    def show_blur_overlay(self) -> None:
+        if self.blur_overlay is None:
+            return
+        self.blur_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self.blur_overlay.lift()
+
+    def hide_blur_overlay(self) -> None:
+        if self.blur_overlay is None:
+            return
+        self.blur_overlay.place_forget()
 
     def _redraw_blur_overlay(self, _event: tk.Event | None = None) -> None:
         if self.blur_overlay is None:
@@ -131,7 +144,7 @@ class CSVPlotterApp(tk.Tk):
             0,
             width,
             height,
-            fill="#d8d8d8",
+            fill="#f3f3f3",
             outline="",
             stipple="gray50",
         )
@@ -140,16 +153,9 @@ class CSVPlotterApp(tk.Tk):
             0,
             width,
             height,
-            fill="#eeeeee",
+            fill="#ffffff",
             outline="",
             stipple="gray25",
-        )
-        self.blur_overlay.create_text(
-            width // 2,
-            height // 2,
-            text="Blurred Area",
-            fill="#666666",
-            font=("Helvetica", 16, "bold"),
         )
 
     def load_csv(self) -> None:
@@ -187,6 +193,8 @@ class CSVPlotterApp(tk.Tk):
         self.x_var.set(columns[0])
         self.y_var.set(columns[1] if len(columns) > 1 else columns[0])
         self.x_period_var.set("All")
+        self.has_plot = False
+        self.show_blur_overlay()
 
         self.file_path_var.set(file_path)
         self._update_preview(self.df.head(20))
@@ -249,6 +257,8 @@ class CSVPlotterApp(tk.Tk):
         self.ax.grid(True, alpha=0.35)
         self.fig.autofmt_xdate()
         self.canvas.draw_idle()
+        self.has_plot = True
+        self.hide_blur_overlay()
 
         self._update_preview(filtered_df.head(20))
         self.status_var.set(
