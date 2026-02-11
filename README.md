@@ -1,12 +1,19 @@
 # CSV Variable Plotter (Desktop)
 
-A native desktop app (Tkinter + Matplotlib) for plotting two variables from a CSV file with optional X-variable period filtering.
+A native desktop app (Tkinter + Matplotlib) for plotting two variables from a CSV file with X-period data slicing.
 
 ## Features
 - Open any `.csv` file from your computer.
 - Choose `X` and `Y` variables.
-- Choose `X period`: `All`, `Last 7 Days`, `Last 30 Days`, `Last 90 Days`, `Last 365 Days`.
+- Choose `X period` as a data slice (not a date):
+  - `All`
+  - `First 10%`
+  - `First 25%`
+  - `Middle 50%`
+  - `Last 25%`
+  - `Last 10%`
 - Plot a 2D line or scatter chart inside the app window.
+- Controls are on the left sidebar; the non-control area uses a blur-style overlay.
 
 ## Setup
 ```bash
@@ -23,4 +30,4 @@ python3 app.py
 
 ## Notes
 - `Tkinter` is part of standard Python on most macOS installs.
-- X-period filtering requires the selected X variable to be datetime-like.
+- X-period now slices the loaded rows by position, not by specific date values.
