@@ -1,3 +1,5 @@
+
+<!-- @import "[TOC]" {cmd="toc" depthFrom=1 depthTo=6 orderedList=false} -->
 # CSV Variable Plotter (Desktop)
 
 A native desktop app (Tkinter + Matplotlib) for plotting two variables from a CSV file with X-period data slicing.
@@ -17,8 +19,6 @@ A native desktop app (Tkinter + Matplotlib) for plotting two variables from a CS
 - Plot a 2D line chart inside the app window.
 - Line mode supports smoothing (`Smooth line` + window size).
 - Supports one-click export via `Export Plot PNG` with configurable `Export DPI`.
-- Hover on the line to view nearest point data in the left panel.
-- Shows peak values (maximum and minimum points) in the left panel.
 - Controls are on the left sidebar.
 - On macOS, when no plot is shown, the right side uses native frosted glass (`NSVisualEffectView`).
 
