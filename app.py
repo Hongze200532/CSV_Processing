@@ -13,11 +13,11 @@ if "seaborn-v0_8-whitegrid" in plt.style.available:
     plt.style.use("seaborn-v0_8-whitegrid")
 plt.rcParams["figure.dpi"] = 160
 plt.rcParams["savefig.dpi"] = 300
-plt.rcParams["font.size"] = 9
-plt.rcParams["axes.titlesize"] = 10
-plt.rcParams["axes.labelsize"] = 9
-plt.rcParams["xtick.labelsize"] = 8
-plt.rcParams["ytick.labelsize"] = 8
+plt.rcParams["font.size"] = 4.5
+plt.rcParams["axes.titlesize"] = 5
+plt.rcParams["axes.labelsize"] = 4.5
+plt.rcParams["xtick.labelsize"] = 4
+plt.rcParams["ytick.labelsize"] = 4
 plt.rcParams["lines.antialiased"] = True
 plt.rcParams["path.simplify"] = True
 plt.rcParams["path.simplify_threshold"] = 0.2
@@ -511,10 +511,10 @@ class CSVPlotterApp(tk.Tk):
             solid_joinstyle="round",
         )
 
-        self.ax.set_xlabel(x_col, fontsize=9)
-        self.ax.set_ylabel(y_col, fontsize=9)
-        self.ax.set_title(f"{y_col} vs {x_col}", fontsize=10)
-        self.ax.tick_params(axis="both", labelsize=8)
+        self.ax.set_xlabel(x_col, fontsize=4.5)
+        self.ax.set_ylabel(y_col, fontsize=4.5)
+        self.ax.set_title(f"{y_col} vs {x_col}", fontsize=5)
+        self.ax.tick_params(axis="both", labelsize=4)
         self.ax.grid(True, alpha=0.28, linestyle="-", linewidth=0.7)
         self.ax.margins(x=0.02, y=0.08)
         self.fig.autofmt_xdate()
