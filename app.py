@@ -9,20 +9,25 @@ import pandas as pd
 
 
 class CSVPlotterApp(tk.Tk):
+    PERIOD_TO_DAYS = {
+        "Last 7 Days": 7,
+        "Last 30 Days": 30,
+        "Last 90 Days": 90,
+        "Last 365 Days": 365,
+    }
+    X_PERIOD_OPTIONS = ["All", *PERIOD_TO_DAYS.keys()]
+
     def __init__(self) -> None:
         super().__init__()
         self.title("CSV Variable Plotter (Desktop)")
         self.geometry("1200x760")
 
         self.df: pd.DataFrame | None = None
-        self.period_dates: pd.Series | None = None
 
         self.file_path_var = tk.StringVar(value="No file selected")
         self.x_var = tk.StringVar()
         self.y_var = tk.StringVar()
-        self.period_col_var = tk.StringVar(value="(None)")
-        self.start_date_var = tk.StringVar()
-        self.end_date_var = tk.StringVar()
+        self.x_period_var = tk.StringVar(value="All")
         self.chart_type_var = tk.StringVar(value="Line")
         self.status_var = tk.StringVar(value="Select a CSV file to begin.")
 
@@ -36,27 +41,27 @@ class CSVPlotterApp(tk.Tk):
             row=0, column=0, padx=(0, 8), pady=(0, 8), sticky="w"
         )
         ttk.Label(controls, textvariable=self.file_path_var).grid(
-            row=0, column=1, columnspan=7, sticky="w", pady=(0, 8)
+            row=0, column=1, columnspan=8, sticky="w", pady=(0, 8)
         )
 
         ttk.Label(controls, text="X variable").grid(row=1, column=0, sticky="w")
         self.x_combo = ttk.Combobox(controls, textvariable=self.x_var, state="readonly", width=20)
         self.x_combo.grid(row=1, column=1, padx=(0, 12), sticky="w")
+        self.x_combo.bind("<<ComboboxSelected>>", self.on_x_variable_change)
 
         ttk.Label(controls, text="Y variable").grid(row=1, column=2, sticky="w")
         self.y_combo = ttk.Combobox(controls, textvariable=self.y_var, state="readonly", width=20)
         self.y_combo.grid(row=1, column=3, padx=(0, 12), sticky="w")
 
-        ttk.Label(controls, text="Period column").grid(row=1, column=4, sticky="w")
-        self.period_combo = ttk.Combobox(
+        ttk.Label(controls, text="X period").grid(row=1, column=4, sticky="w")
+        self.x_period_combo = ttk.Combobox(
             controls,
-            textvariable=self.period_col_var,
+            textvariable=self.x_period_var,
             state="readonly",
-            width=22,
-            values=["(None)"],
+            width=16,
+            values=self.X_PERIOD_OPTIONS,
         )
-        self.period_combo.grid(row=1, column=5, padx=(0, 12), sticky="w")
-        self.period_combo.bind("<<ComboboxSelected>>", self.on_period_column_change)
+        self.x_period_combo.grid(row=1, column=5, padx=(0, 12), sticky="w")
 
         ttk.Label(controls, text="Chart").grid(row=1, column=6, sticky="w")
         self.chart_combo = ttk.Combobox(
@@ -66,24 +71,12 @@ class CSVPlotterApp(tk.Tk):
             width=12,
             values=["Line", "Scatter"],
         )
-        self.chart_combo.grid(row=1, column=7, sticky="w")
+        self.chart_combo.grid(row=1, column=7, padx=(0, 12), sticky="w")
 
-        ttk.Label(controls, text="Start date (YYYY-MM-DD)").grid(row=2, column=0, sticky="w", pady=(8, 0))
-        ttk.Entry(controls, textvariable=self.start_date_var, width=22).grid(
-            row=2, column=1, sticky="w", pady=(8, 0)
-        )
-
-        ttk.Label(controls, text="End date (YYYY-MM-DD)").grid(row=2, column=2, sticky="w", pady=(8, 0))
-        ttk.Entry(controls, textvariable=self.end_date_var, width=22).grid(
-            row=2, column=3, sticky="w", pady=(8, 0)
-        )
-
-        ttk.Button(controls, text="Plot", command=self.plot_data).grid(
-            row=2, column=5, sticky="w", pady=(8, 0)
-        )
+        ttk.Button(controls, text="Plot", command=self.plot_data).grid(row=1, column=8, sticky="w")
 
         ttk.Label(controls, textvariable=self.status_var).grid(
-            row=3, column=0, columnspan=8, sticky="w", pady=(10, 0)
+            row=2, column=0, columnspan=9, sticky="w", pady=(10, 0)
         )
 
         content = ttk.Panedwindow(self, orient=tk.HORIZONTAL)
@@ -129,56 +122,35 @@ class CSVPlotterApp(tk.Tk):
 
         df.columns = [str(col).strip() for col in df.columns]
         self.df = df
-        self.period_dates = None
 
         columns = self.df.columns.tolist()
         self.x_combo["values"] = columns
         self.y_combo["values"] = columns
-        self.period_combo["values"] = ["(None)"] + columns
 
         self.x_var.set(columns[0])
         self.y_var.set(columns[1] if len(columns) > 1 else columns[0])
-        self.period_col_var.set("(None)")
-        self.start_date_var.set("")
-        self.end_date_var.set("")
+        self.x_period_var.set("All")
 
         self.file_path_var.set(file_path)
         self._update_preview(self.df.head(20))
         self.status_var.set(f"Loaded {len(self.df)} rows and {len(columns)} columns.")
 
-    def on_period_column_change(self, _event: tk.Event) -> None:
+    def on_x_variable_change(self, _event: tk.Event) -> None:
         if self.df is None:
             return
 
-        col = self.period_col_var.get()
-        if col == "(None)":
-            self.period_dates = None
-            self.start_date_var.set("")
-            self.end_date_var.set("")
+        x_col = self.x_var.get().strip()
+        if not x_col:
             return
 
-        parsed = pd.to_datetime(self.df[col], errors="coerce")
-        parse_ratio = parsed.notna().mean() if len(parsed) else 0.0
-
-        if parse_ratio < 0.5:
-            self.period_dates = None
-            self.start_date_var.set("")
-            self.end_date_var.set("")
-            messagebox.showwarning(
-                "Invalid period column",
-                "Selected period column is not datetime-like enough for filtering.",
+        parsed_x = pd.to_datetime(self.df[x_col], errors="coerce")
+        x_parse_ratio = parsed_x.notna().mean() if len(parsed_x) else 0.0
+        if x_parse_ratio < 0.5 and self.x_period_var.get() != "All":
+            self.x_period_var.set("All")
+            messagebox.showinfo(
+                "X period reset",
+                "Selected X variable is not datetime-like. X period was reset to 'All'.",
             )
-            return
-
-        self.period_dates = parsed
-        valid_dates = parsed.dropna()
-        if valid_dates.empty:
-            self.start_date_var.set("")
-            self.end_date_var.set("")
-            return
-
-        self.start_date_var.set(str(valid_dates.min().date()))
-        self.end_date_var.set(str(valid_dates.max().date()))
 
     def plot_data(self) -> None:
         if self.df is None:
@@ -192,36 +164,35 @@ class CSVPlotterApp(tk.Tk):
             return
 
         filtered_df = self.df.copy()
+        parsed_x = pd.to_datetime(filtered_df[x_col], errors="coerce")
+        x_parse_ratio = parsed_x.notna().mean() if len(parsed_x) else 0.0
 
-        period_col = self.period_col_var.get()
-        if period_col != "(None)":
-            if self.period_dates is None:
+        x_period = self.x_period_var.get()
+        if x_period != "All":
+            if x_parse_ratio < 0.5:
                 messagebox.showwarning(
-                    "Invalid period settings",
-                    "Choose a valid datetime period column.",
+                    "Invalid X period",
+                    "X period filtering requires X variable to be datetime-like.",
                 )
                 return
 
-            start_ts = pd.to_datetime(self.start_date_var.get().strip(), errors="coerce")
-            end_ts = pd.to_datetime(self.end_date_var.get().strip(), errors="coerce")
-            if pd.isna(start_ts) or pd.isna(end_ts):
-                messagebox.showwarning(
-                    "Invalid dates",
-                    "Use YYYY-MM-DD for start and end dates.",
-                )
+            valid_dates = parsed_x.dropna()
+            if valid_dates.empty:
+                messagebox.showwarning("No datetime values", "Selected X variable has no valid datetime values.")
                 return
 
-            end_ts = end_ts + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-            mask = self.period_dates.between(start_ts, end_ts)
+            days = self.PERIOD_TO_DAYS[x_period]
+            end_ts = valid_dates.max()
+            start_ts = end_ts - pd.Timedelta(days=days)
+            mask = parsed_x.between(start_ts, end_ts)
             filtered_df = filtered_df.loc[mask].copy()
+            parsed_x = parsed_x.loc[mask]
 
         if filtered_df.empty:
-            messagebox.showwarning("No rows", "No rows match the selected period.")
+            messagebox.showwarning("No rows", "No rows match the selected X period.")
             return
 
         filtered_df[y_col] = pd.to_numeric(filtered_df[y_col], errors="coerce")
-        parsed_x = pd.to_datetime(filtered_df[x_col], errors="coerce")
-        x_parse_ratio = parsed_x.notna().mean() if len(parsed_x) else 0.0
         if x_parse_ratio >= 0.8:
             filtered_df[x_col] = parsed_x
 
@@ -247,7 +218,9 @@ class CSVPlotterApp(tk.Tk):
         self.canvas.draw_idle()
 
         self._update_preview(filtered_df.head(20))
-        self.status_var.set(f"Plotted {len(plot_df)} points from {len(filtered_df)} filtered rows.")
+        self.status_var.set(
+            f"Plotted {len(plot_df)} points from {len(filtered_df)} rows (X period: {x_period})."
+        )
 
     def _update_preview(self, df_head: pd.DataFrame) -> None:
         self.preview_text.delete("1.0", tk.END)
