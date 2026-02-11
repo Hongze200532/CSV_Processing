@@ -144,7 +144,7 @@ class CSVPlotterApp(tk.Tk):
         main = ttk.Frame(self, padding=12)
         main.pack(fill=tk.BOTH, expand=True)
 
-        controls = tk.Frame(main, bg="#eaf0f6", width=340)
+        controls = tk.Frame(main, bg="#eaf0f6", width=340, bd=0, highlightthickness=0)
         controls.pack(side=tk.LEFT, fill=tk.Y)
         controls.pack_propagate(False)
 
@@ -301,6 +301,10 @@ class CSVPlotterApp(tk.Tk):
             justify="left",
             anchor="w",
         ).grid(row=5, column=0, sticky="ew")
+
+        # Fill remaining sidebar space so the bottom area never shows window default white.
+        sidebar_fill = tk.Frame(controls, bg=controls.cget("bg"), bd=0, highlightthickness=0)
+        sidebar_fill.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 8))
 
         self.right_panel = tk.Frame(main, bg="#efefef")
         self.right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
