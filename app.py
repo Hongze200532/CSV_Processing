@@ -52,16 +52,23 @@ class CSVPlotterApp(tk.Tk):
 
     def __init__(self) -> None:
         super().__init__()
-        self.title("CSV Variable Plotter (Desktop)")
+        self.title("")
         self.geometry("1400x860")
 
         self.data_frames: dict[str, pd.DataFrame] = {}
+        self.platform_frames: dict[str, dict[str, pd.DataFrame]] = {}
         self.blur_overlay: tk.Canvas | None = None
         self.has_plot = False
         self.right_panel: tk.Frame | None = None
         self.native_blur_view = None
+        self.sidebar_canvas: tk.Canvas | None = None
+        self.sidebar_window_id: int | None = None
+        self.chart_canvas_host: tk.Frame | None = None
+        self.canvas_widget: tk.Widget | None = None
 
-        self.file_path_var = tk.StringVar(value="No file selected")
+        self.file_path_var = tk.StringVar(value="No platform yet. Add a platform first.")
+        self.platform_var = tk.StringVar(value="")
+        self.new_platform_var = tk.StringVar(value="")
         self.x_var = tk.StringVar()
         self.y_var = tk.StringVar()
         self.x_period_var = tk.StringVar(value="All")
@@ -70,8 +77,9 @@ class CSVPlotterApp(tk.Tk):
         self.manual_end_var = tk.StringVar()
         self.smooth_line_var = tk.BooleanVar(value=True)
         self.smooth_window_var = tk.StringVar(value="7")
+        self.plot_size_input_var = tk.StringVar(value="92")
         self.export_dpi_var = tk.StringVar(value="300")
-        self.status_var = tk.StringVar(value="Select a CSV file to begin.")
+        self.status_var = tk.StringVar(value="Add a platform, then choose CSV files.")
         self.hover_point_var = tk.StringVar(value="X: -- | Y: --")
         self.peak_max_var = tk.StringVar(value="Max: --")
         self.peak_min_var = tk.StringVar(value="Min: --")
@@ -84,8 +92,152 @@ class CSVPlotterApp(tk.Tk):
         self.current_plot_xy_pixels: np.ndarray | None = None
         self.hover_snap_px = 14.0
 
+        self.bind("<Escape>", lambda _event: self.destroy())
         self._setup_styles()
         self._build_ui()
+        self.after(80, self._configure_window_chrome)
+
+    def _configure_window_chrome(self) -> None:
+        self.title("")
+        if not HAS_COCOA:
+            return
+
+        app = NSApp()
+        if app is None:
+            self.after(120, self._configure_window_chrome)
+            return
+
+        window = app.mainWindow()
+        if window is None:
+            windows = app.windows()
+            if windows and len(windows) > 0:
+                window = windows[0]
+        if window is None:
+            self.after(120, self._configure_window_chrome)
+            return
+
+        try:
+            window.setTitle_("")
+        except Exception:
+            pass
+        try:
+            window.setTitleVisibility_(1)  # NSWindowTitleHidden
+        except Exception:
+            pass
+        try:
+            window.setTitlebarAppearsTransparent_(True)
+        except Exception:
+            pass
+        try:
+            window.setMovableByWindowBackground_(True)
+        except Exception:
+            pass
+
+    def _draw_rounded_rect(
+        self,
+        canvas: tk.Canvas,
+        x1: float,
+        y1: float,
+        x2: float,
+        y2: float,
+        radius: float,
+        **kwargs,
+    ) -> int:
+        r = max(0.0, min(radius, (x2 - x1) / 2.0, (y2 - y1) / 2.0))
+        points = [
+            x1 + r, y1,
+            x2 - r, y1,
+            x2, y1,
+            x2, y1 + r,
+            x2, y2 - r,
+            x2, y2,
+            x2 - r, y2,
+            x1 + r, y2,
+            x1, y2,
+            x1, y2 - r,
+            x1, y1 + r,
+            x1, y1,
+        ]
+        return canvas.create_polygon(points, smooth=True, splinesteps=24, **kwargs)
+
+    def _redraw_sidebar_shell(self, _event: tk.Event | None = None) -> None:
+        if self.sidebar_canvas is None or self.sidebar_window_id is None:
+            return
+
+        canvas = self.sidebar_canvas
+        width = max(1, canvas.winfo_width())
+        height = max(1, canvas.winfo_height())
+        canvas.delete("shell")
+
+        x1, y1 = 8, 8
+        x2, y2 = width - 8, height - 8
+        radius = 24
+
+        self._draw_rounded_rect(
+            canvas,
+            x1 + 3,
+            y1 + 4,
+            x2 + 3,
+            y2 + 4,
+            radius,
+            fill="#02070f",
+            outline="",
+            tags=("shell",),
+        )
+        self._draw_rounded_rect(
+            canvas,
+            x1,
+            y1,
+            x2,
+            y2,
+            radius,
+            fill=self.colors["sidebar_bg"],
+            outline=self.colors["card_border"],
+            width=1.2,
+            tags=("shell",),
+        )
+
+        inner_pad = 16
+        canvas.coords(self.sidebar_window_id, x1 + inner_pad, y1 + inner_pad)
+        canvas.itemconfigure(
+            self.sidebar_window_id,
+            width=max(260, int(x2 - x1 - inner_pad * 2)),
+            height=max(260, int(y2 - y1 - inner_pad * 2)),
+        )
+
+    def _get_plot_size_percent(self) -> float:
+        raw = self.plot_size_input_var.get().strip().replace("%", "")
+        num = pd.to_numeric(pd.Series([raw]), errors="coerce").iloc[0]
+        if pd.isna(num):
+            return 92.0
+        return float(min(100.0, max(40.0, float(num))))
+
+    def _apply_plot_size_input(self, _event: tk.Event | None = None) -> None:
+        size_pct = self._get_plot_size_percent()
+        self.plot_size_input_var.set(f"{size_pct:g}")
+        self._layout_plot_widget()
+
+    def _layout_plot_widget(self, _event: tk.Event | None = None) -> None:
+        if self.chart_canvas_host is None or self.canvas_widget is None:
+            return
+
+        host_w = max(1, int(self.chart_canvas_host.winfo_width()))
+        host_h = max(1, int(self.chart_canvas_host.winfo_height()))
+        scale = self._get_plot_size_percent() / 100.0
+        usable_w = max(40, int(host_w * scale))
+        usable_h = max(40, int(host_h * scale))
+
+        # Keep a fixed display aspect close to the reference chart ratio.
+        aspect = 1.6
+        target_w = usable_w
+        target_h = int(target_w / aspect)
+        if target_h > usable_h:
+            target_h = usable_h
+            target_w = int(target_h * aspect)
+
+        x = max(0, (host_w - target_w) // 2)
+        y = max(0, (host_h - target_h) // 2)
+        self.canvas_widget.place(x=x, y=y, width=max(40, target_w), height=max(40, target_h))
 
     def _setup_styles(self) -> None:
         self.colors = {
@@ -225,11 +377,22 @@ class CSVPlotterApp(tk.Tk):
 
     def _build_ui(self) -> None:
         main = tk.Frame(self, bg=self.colors["root_bg"], bd=0, highlightthickness=0)
-        main.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
+        main.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
 
-        controls = tk.Frame(main, bg=self.colors["sidebar_bg"], width=340, bd=0, highlightthickness=0)
-        controls.pack(side=tk.LEFT, fill=tk.Y)
+        sidebar_shell = tk.Canvas(
+            main,
+            bg=self.colors["root_bg"],
+            highlightthickness=0,
+            bd=0,
+            width=650,
+        )
+        sidebar_shell.pack(side=tk.LEFT, fill=tk.Y, padx=(10, 10), pady=(10, 10))
+
+        controls = tk.Frame(sidebar_shell, bg=self.colors["sidebar_bg"], width=616, bd=0, highlightthickness=0)
         controls.pack_propagate(False)
+        self.sidebar_canvas = sidebar_shell
+        self.sidebar_window_id = sidebar_shell.create_window(0, 0, anchor="nw", window=controls)
+        sidebar_shell.bind("<Configure>", self._redraw_sidebar_shell)
 
         header = tk.Frame(
             controls,
@@ -238,26 +401,51 @@ class CSVPlotterApp(tk.Tk):
             highlightbackground=self.colors["card_border"],
         )
         header.pack(fill=tk.X, padx=10, pady=(6, 8))
-        tk.Label(
+        title_label = tk.Label(
             header,
             text="CSV Plot Studio",
             bg=self.colors["card_bg"],
             fg=self.colors["title_fg"],
             font=("SF Pro Display", 14, "bold"),
             anchor="w",
-        ).pack(fill=tk.X, padx=12, pady=(10, 2))
-        tk.Label(
-            header,
-            text="Clean analysis workflow inspired by OpenAI + AppleOS.",
-            bg=self.colors["card_bg"],
-            fg=self.colors["muted_fg"],
-            font=("SF Pro Text", 9),
-            anchor="w",
-            justify="left",
-            wraplength=300,
-        ).pack(fill=tk.X, padx=12, pady=(0, 10))
+        )
+        title_label.pack(fill=tk.X, padx=12, pady=(10, 10))
 
-        _, source_inner = self._make_sidebar_card(controls, "Data Source")
+        bars_row = tk.Frame(controls, bg=self.colors["sidebar_bg"])
+        bars_row.pack(fill=tk.BOTH, expand=True, padx=4, pady=(0, 8))
+
+        source_bar = tk.Frame(bars_row, bg=self.colors["sidebar_bg"], width=250)
+        source_bar.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 8))
+        source_bar.pack_propagate(False)
+
+        split_line = tk.Frame(bars_row, bg=self.colors["card_border"], width=1, bd=0, highlightthickness=0)
+        split_line.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 8))
+
+        main_bar = tk.Frame(bars_row, bg=self.colors["sidebar_bg"], width=340)
+        main_bar.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        main_bar.pack_propagate(False)
+
+        _, platform_inner = self._make_sidebar_card(source_bar, "Platforms")
+        platform_inner.columnconfigure(0, weight=1)
+        ttk.Label(platform_inner, text="Current platform", style="Card.TLabel").grid(row=0, column=0, sticky="w")
+        self.platform_combo = ttk.Combobox(
+            platform_inner,
+            textvariable=self.platform_var,
+            state="readonly",
+            values=[],
+            style="CardInput.TCombobox",
+        )
+        self.platform_combo.grid(row=1, column=0, sticky="ew", pady=(2, 8))
+        self.platform_combo.bind("<<ComboboxSelected>>", self.on_platform_change)
+        ttk.Label(platform_inner, text="New platform name", style="Card.TLabel").grid(row=2, column=0, sticky="w")
+        ttk.Entry(platform_inner, textvariable=self.new_platform_var, style="CardInput.TEntry").grid(
+            row=3, column=0, sticky="ew", pady=(2, 8)
+        )
+        ttk.Button(platform_inner, text="Add Platform", style="Secondary.TButton", command=self.add_platform).grid(
+            row=4, column=0, sticky="ew"
+        )
+
+        _, source_inner = self._make_sidebar_card(source_bar, "Choose CSV")
         source_inner.columnconfigure(0, weight=1)
         ttk.Button(source_inner, text="Choose CSV(s)", style="Primary.TButton", command=self.load_csv).grid(
             row=0, column=0, sticky="ew", pady=(0, 8)
@@ -269,11 +457,11 @@ class CSVPlotterApp(tk.Tk):
             fg=self.colors["text_fg"],
             font=("SF Pro Text", 9),
             justify="left",
-            wraplength=300,
+            wraplength=220,
             anchor="w",
         ).grid(row=1, column=0, sticky="ew")
 
-        _, vars_inner = self._make_sidebar_card(controls, "Variables & Mode")
+        _, vars_inner = self._make_sidebar_card(main_bar, "Variables & Mode")
         vars_inner.columnconfigure(0, weight=1)
         ttk.Label(vars_inner, text="X variable", style="Card.TLabel").grid(row=0, column=0, sticky="w")
         self.x_combo = ttk.Combobox(vars_inner, textvariable=self.x_var, state="readonly", style="CardInput.TCombobox")
@@ -291,7 +479,7 @@ class CSVPlotterApp(tk.Tk):
         )
         self.plot_mode_combo.grid(row=5, column=0, sticky="ew", pady=(2, 0))
 
-        _, period_inner = self._make_sidebar_card(controls, "X Period")
+        _, period_inner = self._make_sidebar_card(main_bar, "X Period")
         period_inner.columnconfigure(0, weight=1)
         ttk.Label(period_inner, text="X period", style="Card.TLabel").grid(row=0, column=0, sticky="w")
         self.x_period_combo = ttk.Combobox(
@@ -310,7 +498,7 @@ class CSVPlotterApp(tk.Tk):
         self.manual_end_entry = ttk.Entry(period_inner, textvariable=self.manual_end_var, state="disabled", style="CardInput.TEntry")
         self.manual_end_entry.grid(row=5, column=0, sticky="ew")
 
-        _, render_inner = self._make_sidebar_card(controls, "Render & Export")
+        _, render_inner = self._make_sidebar_card(main_bar, "Render & Export")
         render_inner.columnconfigure(0, weight=1)
         ttk.Checkbutton(
             render_inner,
@@ -325,113 +513,52 @@ class CSVPlotterApp(tk.Tk):
         ttk.Entry(render_inner, textvariable=self.export_dpi_var, style="CardInput.TEntry").grid(
             row=3, column=0, sticky="ew", pady=(2, 10)
         )
+        ttk.Label(render_inner, text="Display size (%)", style="Card.TLabel").grid(row=4, column=0, sticky="w")
+        self.plot_size_entry = ttk.Entry(render_inner, textvariable=self.plot_size_input_var, style="CardInput.TEntry")
+        self.plot_size_entry.grid(row=5, column=0, sticky="ew", pady=(2, 10))
+        self.plot_size_entry.bind("<Return>", self._apply_plot_size_input)
+        self.plot_size_entry.bind("<FocusOut>", self._apply_plot_size_input)
         ttk.Button(render_inner, text="Plot", style="Primary.TButton", command=self.plot_data).grid(
-            row=4, column=0, sticky="ew", pady=(0, 6)
+            row=6, column=0, sticky="ew", pady=(0, 6)
         )
         ttk.Button(render_inner, text="Export Plot PNG", style="Secondary.TButton", command=self.export_plot).grid(
-            row=5, column=0, sticky="ew"
+            row=7, column=0, sticky="ew"
         )
 
-        _, insight_inner = self._make_sidebar_card(controls, "Insights")
-        insight_inner.columnconfigure(0, weight=1)
-        tk.Label(
-            insight_inner,
-            textvariable=self.status_var,
-            bg=self.colors["card_bg"],
-            fg=self.colors["text_fg"],
-            font=("SF Pro Text", 9),
-            wraplength=300,
-            justify="left",
-            anchor="w",
-        ).grid(row=0, column=0, sticky="ew", pady=(0, 6))
-        tk.Label(
-            insight_inner,
-            text="Hover Point",
-            bg=self.colors["card_bg"],
-            fg=self.colors["muted_fg"],
-            font=("SF Pro Text", 8, "bold"),
-            anchor="w",
-        ).grid(row=1, column=0, sticky="w")
-        tk.Label(
-            insight_inner,
-            textvariable=self.hover_point_var,
-            bg=self.colors["card_bg"],
-            fg=self.colors["text_fg"],
-            font=("SF Pro Text", 9),
-            wraplength=300,
-            justify="left",
-            anchor="w",
-        ).grid(row=2, column=0, sticky="ew", pady=(0, 6))
-        tk.Label(
-            insight_inner,
-            text="Peaks",
-            bg=self.colors["card_bg"],
-            fg=self.colors["muted_fg"],
-            font=("SF Pro Text", 8, "bold"),
-            anchor="w",
-        ).grid(row=3, column=0, sticky="w")
-        tk.Label(
-            insight_inner,
-            textvariable=self.peak_max_var,
-            bg=self.colors["card_bg"],
-            fg=self.colors["text_fg"],
-            font=("SF Pro Text", 9),
-            wraplength=300,
-            justify="left",
-            anchor="w",
-        ).grid(row=4, column=0, sticky="ew")
-        tk.Label(
-            insight_inner,
-            textvariable=self.peak_min_var,
-            bg=self.colors["card_bg"],
-            fg=self.colors["text_fg"],
-            font=("SF Pro Text", 9),
-            wraplength=300,
-            justify="left",
-            anchor="w",
-        ).grid(row=5, column=0, sticky="ew")
-
-        sidebar_fill = tk.Frame(
-            controls,
+        source_fill = tk.Frame(
+            source_bar,
             bg=self.colors["sidebar_bg"],
             bd=0,
             highlightthickness=0,
         )
-        sidebar_fill.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 8))
+        source_fill.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 8))
+
+        main_fill = tk.Frame(
+            main_bar,
+            bg=self.colors["sidebar_bg"],
+            bd=0,
+            highlightthickness=0,
+        )
+        main_fill.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 8))
 
         self.right_panel = tk.Frame(main, bg=self.colors["root_bg"])
-        self.right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10), pady=(10, 10))
+        self.after_idle(self._redraw_sidebar_shell)
 
-        content = ttk.Panedwindow(self.right_panel, orient=tk.HORIZONTAL)
-        content.pack(fill=tk.BOTH, expand=True)
-
-        preview_frame = ttk.Frame(content, padding=(0, 8, 8, 8))
-        chart_frame = ttk.Frame(content, padding=(8, 8, 0, 8))
-        content.add(preview_frame, weight=1)
-        content.add(chart_frame, weight=2)
-
-        ttk.Label(preview_frame, text="Data Preview (first 20 rows)").pack(anchor="w")
-        self.preview_text = tk.Text(
-            preview_frame,
-            wrap=tk.NONE,
-            height=28,
-            bg=self.colors["axes_bg"],
-            fg=self.colors["text_fg"],
-            insertbackground=self.colors["text_fg"],
-            selectbackground=self.colors["accent"],
-            bd=1,
-            highlightthickness=1,
-            highlightbackground=self.colors["card_border"],
-            relief="flat",
-        )
-        self.preview_text.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
+        chart_frame = ttk.Frame(self.right_panel, padding=(8, 8, 8, 8))
+        chart_frame.pack(fill=tk.BOTH, expand=True)
 
         self.fig, self.ax = plt.subplots(figsize=(11.5, 7.2), dpi=180, constrained_layout=True)
         self.fig.patch.set_facecolor(self.colors["plot_bg"])
         self.ax.set_facecolor(self.colors["axes_bg"])
-        self.canvas = FigureCanvasTkAgg(self.fig, master=chart_frame)
-        self.canvas.get_tk_widget().configure(bg=self.colors["plot_bg"], highlightthickness=0)
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        self.chart_canvas_host = tk.Frame(chart_frame, bg=self.colors["root_bg"], bd=0, highlightthickness=0)
+        self.chart_canvas_host.pack(fill=tk.BOTH, expand=True)
+        self.chart_canvas_host.bind("<Configure>", self._layout_plot_widget)
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.chart_canvas_host)
+        self.canvas_widget = self.canvas.get_tk_widget()
+        self.canvas_widget.configure(bg=self.colors["plot_bg"], highlightthickness=0)
+        self.canvas_widget.place(x=0, y=0)
+        self.after_idle(self._layout_plot_widget)
         self.canvas.mpl_connect("motion_notify_event", self._on_plot_hover)
 
         if HAS_COCOA:
@@ -799,7 +926,121 @@ class CSVPlotterApp(tk.Tk):
         self.fig.savefig(out_path, dpi=dpi, bbox_inches="tight", facecolor=self.fig.get_facecolor())
         self.status_var.set(f"Saved plot: {out_path} (DPI: {dpi})")
 
+    def _make_unique_platform_name(self, base_name: str = "Platform") -> str:
+        idx = 1
+        while True:
+            candidate = f"{base_name} {idx}"
+            if candidate not in self.platform_frames:
+                return candidate
+            idx += 1
+
+    def _make_unique_file_name(self, existing_files: dict[str, pd.DataFrame], file_name: str) -> str:
+        if file_name not in existing_files:
+            return file_name
+        stem = Path(file_name).stem
+        suffix = Path(file_name).suffix
+        idx = 2
+        while True:
+            candidate = f"{stem} ({idx}){suffix}"
+            if candidate not in existing_files:
+                return candidate
+            idx += 1
+
+    def _flatten_platform_frames(
+        self,
+        source_map: dict[str, dict[str, pd.DataFrame]] | None = None,
+    ) -> dict[str, pd.DataFrame]:
+        merged: dict[str, pd.DataFrame] = {}
+        platforms = self.platform_frames if source_map is None else source_map
+        for platform_name, file_map in platforms.items():
+            for file_name, frame in file_map.items():
+                merged[f"{platform_name} / {file_name}"] = frame
+        return merged
+
+    def _get_common_columns(self, frame_map: dict[str, pd.DataFrame]) -> list[str]:
+        if not frame_map:
+            return []
+        first_name = next(iter(frame_map))
+        first_df = frame_map[first_name]
+        common_cols = set(first_df.columns)
+        for frame in frame_map.values():
+            common_cols &= set(frame.columns)
+        return [col for col in first_df.columns if col in common_cols]
+
+    def _refresh_platform_selector(self) -> None:
+        platforms = list(self.platform_frames.keys())
+        if hasattr(self, "platform_combo"):
+            self.platform_combo["values"] = platforms
+        current = self.platform_var.get().strip()
+        if current not in platforms:
+            self.platform_var.set(platforms[0] if platforms else "")
+
+    def on_platform_change(self, _event: tk.Event | None = None) -> None:
+        self._update_source_summary()
+
+    def _update_source_summary(self) -> None:
+        total_platforms = len(self.platform_frames)
+        total_files = sum(len(file_map) for file_map in self.platform_frames.values())
+        if total_platforms == 0:
+            self.file_path_var.set("No platform yet. Add a platform first.")
+            return
+
+        selected = self.platform_var.get().strip()
+        selected_count = len(self.platform_frames.get(selected, {})) if selected else 0
+        head_items = list(self.platform_frames.items())[:3]
+        head_text = ", ".join(f"{name}: {len(files)}" for name, files in head_items)
+        suffix = f" ... (+{total_platforms - 3} more)" if total_platforms > 3 else ""
+        self.file_path_var.set(
+            f"Platforms: {total_platforms} | CSVs: {total_files}\n"
+            f"Selected: {selected or '--'} ({selected_count}) | {head_text}{suffix}"
+        )
+
+    def _apply_loaded_data_state(self, columns: list[str]) -> None:
+        self.x_combo["values"] = columns
+        self.y_combo["values"] = columns
+        self.x_var.set(columns[0] if self.x_var.get() not in columns else self.x_var.get())
+        self.y_var.set(columns[1] if self.y_var.get() not in columns and len(columns) > 1 else (self.y_var.get() or columns[0]))
+        if self.y_var.get() not in columns:
+            self.y_var.set(columns[1] if len(columns) > 1 else columns[0])
+
+        self.x_period_var.set("All")
+        self.manual_start_var.set("")
+        self.manual_end_var.set("")
+        self.on_x_period_change()
+        self.has_plot = False
+        self._clear_plot_insights()
+        self.show_blur_overlay()
+        self._update_source_summary()
+
+    def add_platform(self) -> None:
+        platform_name = self.new_platform_var.get().strip()
+        if not platform_name:
+            platform_name = self._make_unique_platform_name()
+
+        if platform_name in self.platform_frames:
+            self.platform_var.set(platform_name)
+            self.new_platform_var.set("")
+            self._refresh_platform_selector()
+            self._update_source_summary()
+            self.status_var.set(f"Platform already exists: {platform_name}")
+            return
+
+        self.platform_frames[platform_name] = {}
+        self.platform_var.set(platform_name)
+        self.new_platform_var.set("")
+        self._refresh_platform_selector()
+        self._update_source_summary()
+        self.status_var.set(f"Added platform: {platform_name}. Now choose CSV files.")
+
     def load_csv(self) -> None:
+        platform_name = self.platform_var.get().strip()
+        if not platform_name:
+            messagebox.showinfo("No platform", "Please add/select a platform first.")
+            return
+        if platform_name not in self.platform_frames:
+            self.platform_frames[platform_name] = {}
+            self._refresh_platform_selector()
+
         file_paths = filedialog.askopenfilenames(
             title="Select CSV file(s)",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
@@ -807,6 +1048,7 @@ class CSVPlotterApp(tk.Tk):
         if not file_paths:
             return
 
+        existing_in_platform = dict(self.platform_frames.get(platform_name, {}))
         loaded_frames: dict[str, pd.DataFrame] = {}
         failed_files: list[str] = []
         for file_path in file_paths:
@@ -827,53 +1069,33 @@ class CSVPlotterApp(tk.Tk):
                 continue
 
             df.columns = [str(col).strip() for col in df.columns]
-            loaded_frames[path_obj.name] = df
+            unique_name = self._make_unique_file_name(existing_in_platform, path_obj.name)
+            existing_in_platform[unique_name] = df
+            loaded_frames[unique_name] = df
 
         if not loaded_frames:
             messagebox.showwarning("No data", "No valid CSV files were loaded.")
             return
 
-        self.data_frames = loaded_frames
-        first_name = next(iter(self.data_frames))
-        first_df = self.data_frames[first_name]
-        common_cols = set(first_df.columns)
-        for frame in self.data_frames.values():
-            common_cols &= set(frame.columns)
-
-        columns = [c for c in first_df.columns if c in common_cols]
+        candidate_platforms = {name: dict(file_map) for name, file_map in self.platform_frames.items()}
+        candidate_platforms[platform_name] = existing_in_platform
+        candidate_frames = self._flatten_platform_frames(candidate_platforms)
+        columns = self._get_common_columns(candidate_frames)
         if len(columns) < 2:
             messagebox.showwarning(
                 "Column mismatch",
-                "Loaded files do not share enough common columns for X/Y plotting.",
+                "Loaded files do not share enough common columns for X/Y plotting. Files were not added.",
             )
             return
 
-        self.x_combo["values"] = columns
-        self.y_combo["values"] = columns
-
-        self.x_var.set(columns[0] if self.x_var.get() not in columns else self.x_var.get())
-        self.y_var.set(columns[1] if self.y_var.get() not in columns and len(columns) > 1 else (self.y_var.get() or columns[0]))
-        if self.y_var.get() not in columns:
-            self.y_var.set(columns[1] if len(columns) > 1 else columns[0])
-        self.x_period_var.set("All")
-        self.manual_start_var.set("")
-        self.manual_end_var.set("")
-        self.on_x_period_change()
-        self.has_plot = False
-        self._clear_plot_insights()
-        self.show_blur_overlay()
-
-        if len(self.data_frames) == 1:
-            self.file_path_var.set(next(iter(self.data_frames)))
-        else:
-            head_names = list(self.data_frames.keys())[:3]
-            suffix = f" ... (+{len(self.data_frames)-3} more)" if len(self.data_frames) > 3 else ""
-            self.file_path_var.set(f"{len(self.data_frames)} files: {', '.join(head_names)}{suffix}")
-
-        self._update_preview(first_df.head(20))
+        self.platform_frames = candidate_platforms
+        self.data_frames = candidate_frames
+        self._refresh_platform_selector()
+        self._apply_loaded_data_state(columns)
         failed_note = f" | skipped: {', '.join(failed_files)}" if failed_files else ""
         self.status_var.set(
-            f"Loaded {len(self.data_frames)} file(s), common columns: {len(columns)}{failed_note}"
+            f"Platform '{platform_name}': added {len(loaded_frames)} CSV(s) | "
+            f"total files: {len(self.data_frames)} | common columns: {len(columns)}{failed_note}"
         )
 
     def plot_data(self) -> None:
@@ -945,7 +1167,6 @@ class CSVPlotterApp(tk.Tk):
                     "x": plot_df[x_col].reset_index(drop=True),
                     "y": y_plot.reset_index(drop=True),
                     "rows": len(plot_df),
-                    "preview": filtered_df.head(20),
                 }
             )
 
@@ -1025,16 +1246,11 @@ class CSVPlotterApp(tk.Tk):
         self._update_peak_info_multi(prepared, x_col, y_col)
         self.has_plot = True
         self.hide_blur_overlay()
-
-        self._update_preview(prepared[0]["preview"])
+        self._apply_plot_size_input()
         skipped_note = f" | skipped: {len(skipped_sources)}" if skipped_sources else ""
         self.status_var.set(
             f"Mode: {mode} | files plotted: {len(prepared)} | points: {total_points}{skipped_note} | X period: {x_period}"
         )
-
-    def _update_preview(self, df_head: pd.DataFrame) -> None:
-        self.preview_text.delete("1.0", tk.END)
-        self.preview_text.insert(tk.END, df_head.to_string(index=False))
 
 
 if __name__ == "__main__":
