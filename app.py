@@ -1,133 +1,259 @@
 import io
-import sys
+from pathlib import Path
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import pandas as pd
-import plotly.express as px
-import streamlit as st
-
-# If someone runs `python app.py`, exit early with a clear command.
-if __name__ == "__main__" and "streamlit" not in (sys.argv[0] or "").lower():
-    print("This is a Streamlit app. Run it with: streamlit run app.py")
-    raise SystemExit(0)
-
-st.set_page_config(page_title="CSV Variable Plotter", layout="wide")
 
 
-def try_parse_datetime(series: pd.Series) -> tuple[pd.Series, float]:
-    parsed = pd.to_datetime(series, errors="coerce", infer_datetime_format=True)
-    ratio = parsed.notna().mean() if len(series) else 0.0
-    return parsed, float(ratio)
+class CSVPlotterApp(tk.Tk):
+    def __init__(self) -> None:
+        super().__init__()
+        self.title("CSV Variable Plotter (Desktop)")
+        self.geometry("1200x760")
 
+        self.df: pd.DataFrame | None = None
+        self.period_dates: pd.Series | None = None
 
-def stop_app(code: int = 0) -> None:
-    """Stop in Streamlit mode and also exit cleanly in bare Python mode."""
-    st.stop()
-    raise SystemExit(code)
+        self.file_path_var = tk.StringVar(value="No file selected")
+        self.x_var = tk.StringVar()
+        self.y_var = tk.StringVar()
+        self.period_col_var = tk.StringVar(value="(None)")
+        self.start_date_var = tk.StringVar()
+        self.end_date_var = tk.StringVar()
+        self.chart_type_var = tk.StringVar(value="Line")
+        self.status_var = tk.StringVar(value="Select a CSV file to begin.")
 
+        self._build_ui()
 
-st.title("CSV Variable Plotter")
-st.caption(
-    "Upload a CSV file, choose two variables, optionally filter by a time period, and generate a 2D plot."
-)
+    def _build_ui(self) -> None:
+        controls = ttk.Frame(self, padding=12)
+        controls.pack(side=tk.TOP, fill=tk.X)
 
-uploaded_file = st.file_uploader("Choose a CSV file", type=["csv"])
+        ttk.Button(controls, text="Choose CSV", command=self.load_csv).grid(
+            row=0, column=0, padx=(0, 8), pady=(0, 8), sticky="w"
+        )
+        ttk.Label(controls, textvariable=self.file_path_var).grid(
+            row=0, column=1, columnspan=7, sticky="w", pady=(0, 8)
+        )
 
-if uploaded_file is None:
-    st.info("Upload a CSV file to begin.")
-    stop_app()
+        ttk.Label(controls, text="X variable").grid(row=1, column=0, sticky="w")
+        self.x_combo = ttk.Combobox(controls, textvariable=self.x_var, state="readonly", width=20)
+        self.x_combo.grid(row=1, column=1, padx=(0, 12), sticky="w")
 
-raw_bytes = uploaded_file.getvalue()
-if not raw_bytes.strip():
-    st.warning("The uploaded file is empty.")
-    stop_app()
+        ttk.Label(controls, text="Y variable").grid(row=1, column=2, sticky="w")
+        self.y_combo = ttk.Combobox(controls, textvariable=self.y_var, state="readonly", width=20)
+        self.y_combo.grid(row=1, column=3, padx=(0, 12), sticky="w")
 
-# Decode safely and skip malformed rows so this path doesn't rely on try/except.
-csv_text = raw_bytes.decode("utf-8", errors="replace")
-df = pd.read_csv(io.StringIO(csv_text), on_bad_lines="skip")
+        ttk.Label(controls, text="Period column").grid(row=1, column=4, sticky="w")
+        self.period_combo = ttk.Combobox(
+            controls,
+            textvariable=self.period_col_var,
+            state="readonly",
+            width=22,
+            values=["(None)"],
+        )
+        self.period_combo.grid(row=1, column=5, padx=(0, 12), sticky="w")
+        self.period_combo.bind("<<ComboboxSelected>>", self.on_period_column_change)
 
-if df.empty:
-    st.warning("The uploaded CSV file is empty.")
-    stop_app()
+        ttk.Label(controls, text="Chart").grid(row=1, column=6, sticky="w")
+        self.chart_combo = ttk.Combobox(
+            controls,
+            textvariable=self.chart_type_var,
+            state="readonly",
+            width=12,
+            values=["Line", "Scatter"],
+        )
+        self.chart_combo.grid(row=1, column=7, sticky="w")
 
-# Clean column names for easier selection in UI.
-df.columns = [str(col).strip() for col in df.columns]
-columns = df.columns.tolist()
+        ttk.Label(controls, text="Start date (YYYY-MM-DD)").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(controls, textvariable=self.start_date_var, width=22).grid(
+            row=2, column=1, sticky="w", pady=(8, 0)
+        )
 
-st.subheader("Data Preview")
-st.dataframe(df.head(50), use_container_width=True)
+        ttk.Label(controls, text="End date (YYYY-MM-DD)").grid(row=2, column=2, sticky="w", pady=(8, 0))
+        ttk.Entry(controls, textvariable=self.end_date_var, width=22).grid(
+            row=2, column=3, sticky="w", pady=(8, 0)
+        )
 
-with st.sidebar:
-    st.header("Plot Settings")
-    x_col = st.selectbox("X variable", columns, index=0)
-    y_col = st.selectbox("Y variable", columns, index=1 if len(columns) > 1 else 0)
+        ttk.Button(controls, text="Plot", command=self.plot_data).grid(
+            row=2, column=5, sticky="w", pady=(8, 0)
+        )
 
-    # Let users pick a column representing period/time for filtering.
-    filter_col = st.selectbox("Period filter column (optional)", ["(None)"] + columns)
+        ttk.Label(controls, textvariable=self.status_var).grid(
+            row=3, column=0, columnspan=8, sticky="w", pady=(10, 0)
+        )
 
-    parsed_filter_dates = None
-    if filter_col != "(None)":
-        parsed_filter_dates, parse_ratio = try_parse_datetime(df[filter_col])
+        content = ttk.Panedwindow(self, orient=tk.HORIZONTAL)
+        content.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
+
+        preview_frame = ttk.Frame(content, padding=(0, 8, 8, 8))
+        chart_frame = ttk.Frame(content, padding=(8, 8, 0, 8))
+        content.add(preview_frame, weight=1)
+        content.add(chart_frame, weight=2)
+
+        ttk.Label(preview_frame, text="Data Preview (first 20 rows)").pack(anchor="w")
+        self.preview_text = tk.Text(preview_frame, wrap=tk.NONE, height=28)
+        self.preview_text.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
+
+        self.fig, self.ax = plt.subplots(figsize=(7.5, 5.5))
+        self.canvas = FigureCanvasTkAgg(self.fig, master=chart_frame)
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def load_csv(self) -> None:
+        file_path = filedialog.askopenfilename(
+            title="Select CSV file",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        if not file_path:
+            return
+
+        path_obj = Path(file_path)
+        if not path_obj.exists() or path_obj.stat().st_size == 0:
+            messagebox.showwarning("Invalid file", "Selected file is empty or unavailable.")
+            return
+
+        raw_bytes = path_obj.read_bytes()
+        if not raw_bytes.strip():
+            messagebox.showwarning("Invalid file", "Selected file has no content.")
+            return
+
+        csv_text = raw_bytes.decode("utf-8", errors="replace")
+        df = pd.read_csv(io.StringIO(csv_text), on_bad_lines="skip")
+
+        if df.empty:
+            messagebox.showwarning("No data", "CSV contains no readable rows.")
+            return
+
+        df.columns = [str(col).strip() for col in df.columns]
+        self.df = df
+        self.period_dates = None
+
+        columns = self.df.columns.tolist()
+        self.x_combo["values"] = columns
+        self.y_combo["values"] = columns
+        self.period_combo["values"] = ["(None)"] + columns
+
+        self.x_var.set(columns[0])
+        self.y_var.set(columns[1] if len(columns) > 1 else columns[0])
+        self.period_col_var.set("(None)")
+        self.start_date_var.set("")
+        self.end_date_var.set("")
+
+        self.file_path_var.set(file_path)
+        self._update_preview(self.df.head(20))
+        self.status_var.set(f"Loaded {len(self.df)} rows and {len(columns)} columns.")
+
+    def on_period_column_change(self, _event: tk.Event) -> None:
+        if self.df is None:
+            return
+
+        col = self.period_col_var.get()
+        if col == "(None)":
+            self.period_dates = None
+            self.start_date_var.set("")
+            self.end_date_var.set("")
+            return
+
+        parsed = pd.to_datetime(self.df[col], errors="coerce")
+        parse_ratio = parsed.notna().mean() if len(parsed) else 0.0
+
         if parse_ratio < 0.5:
-            st.warning(
-                "Selected period column does not look like datetime values. "
-                "Choose a datetime-like column for time-period filtering."
+            self.period_dates = None
+            self.start_date_var.set("")
+            self.end_date_var.set("")
+            messagebox.showwarning(
+                "Invalid period column",
+                "Selected period column is not datetime-like enough for filtering.",
             )
-            parsed_filter_dates = None
+            return
 
-    start_ts = end_ts = None
-    if parsed_filter_dates is not None:
-        valid_dates = parsed_filter_dates.dropna()
+        self.period_dates = parsed
+        valid_dates = parsed.dropna()
         if valid_dates.empty:
-            st.warning("No valid datetime values found in selected period column.")
-        else:
-            min_date = valid_dates.min().date()
-            max_date = valid_dates.max().date()
-            date_range = st.date_input(
-                "Select time period",
-                value=(min_date, max_date),
-                min_value=min_date,
-                max_value=max_date,
+            self.start_date_var.set("")
+            self.end_date_var.set("")
+            return
+
+        self.start_date_var.set(str(valid_dates.min().date()))
+        self.end_date_var.set(str(valid_dates.max().date()))
+
+    def plot_data(self) -> None:
+        if self.df is None:
+            messagebox.showinfo("No data", "Load a CSV file first.")
+            return
+
+        x_col = self.x_var.get().strip()
+        y_col = self.y_var.get().strip()
+        if not x_col or not y_col:
+            messagebox.showwarning("Missing selection", "Choose X and Y variables.")
+            return
+
+        filtered_df = self.df.copy()
+
+        period_col = self.period_col_var.get()
+        if period_col != "(None)":
+            if self.period_dates is None:
+                messagebox.showwarning(
+                    "Invalid period settings",
+                    "Choose a valid datetime period column.",
+                )
+                return
+
+            start_ts = pd.to_datetime(self.start_date_var.get().strip(), errors="coerce")
+            end_ts = pd.to_datetime(self.end_date_var.get().strip(), errors="coerce")
+            if pd.isna(start_ts) or pd.isna(end_ts):
+                messagebox.showwarning(
+                    "Invalid dates",
+                    "Use YYYY-MM-DD for start and end dates.",
+                )
+                return
+
+            end_ts = end_ts + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+            mask = self.period_dates.between(start_ts, end_ts)
+            filtered_df = filtered_df.loc[mask].copy()
+
+        if filtered_df.empty:
+            messagebox.showwarning("No rows", "No rows match the selected period.")
+            return
+
+        filtered_df[y_col] = pd.to_numeric(filtered_df[y_col], errors="coerce")
+        parsed_x = pd.to_datetime(filtered_df[x_col], errors="coerce")
+        x_parse_ratio = parsed_x.notna().mean() if len(parsed_x) else 0.0
+        if x_parse_ratio >= 0.8:
+            filtered_df[x_col] = parsed_x
+
+        plot_df = filtered_df[[x_col, y_col]].dropna()
+        if plot_df.empty:
+            messagebox.showwarning(
+                "No valid data",
+                "No valid points remain after filtering and numeric conversion.",
             )
-            if isinstance(date_range, tuple) and len(date_range) == 2:
-                start_ts = pd.Timestamp(date_range[0])
-                end_ts = pd.Timestamp(date_range[1]) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+            return
 
-    chart_type = st.radio("Chart type", ["Line", "Scatter"], horizontal=True)
+        self.ax.clear()
+        if self.chart_type_var.get() == "Line":
+            self.ax.plot(plot_df[x_col], plot_df[y_col], linewidth=1.5)
+        else:
+            self.ax.scatter(plot_df[x_col], plot_df[y_col], s=18)
 
-filtered_df = df.copy()
+        self.ax.set_xlabel(x_col)
+        self.ax.set_ylabel(y_col)
+        self.ax.set_title(f"{y_col} vs {x_col}")
+        self.ax.grid(True, alpha=0.35)
+        self.fig.autofmt_xdate()
+        self.canvas.draw_idle()
 
-if parsed_filter_dates is not None and start_ts is not None and end_ts is not None:
-    mask = parsed_filter_dates.between(start_ts, end_ts)
-    filtered_df = filtered_df.loc[mask].copy()
+        self._update_preview(filtered_df.head(20))
+        self.status_var.set(f"Plotted {len(plot_df)} points from {len(filtered_df)} filtered rows.")
 
-if filtered_df.empty:
-    st.warning("No rows match the selected time period.")
-    stop_app()
+    def _update_preview(self, df_head: pd.DataFrame) -> None:
+        self.preview_text.delete("1.0", tk.END)
+        self.preview_text.insert(tk.END, df_head.to_string(index=False))
 
-# Convert Y to numeric for mathematical-style 2D plots.
-filtered_df[y_col] = pd.to_numeric(filtered_df[y_col], errors="coerce")
 
-# If X can be parsed as datetime, use datetime to improve axis formatting.
-parsed_x_dates, x_parse_ratio = try_parse_datetime(filtered_df[x_col])
-if x_parse_ratio >= 0.8:
-    filtered_df[x_col] = parsed_x_dates
-
-plot_df = filtered_df[[x_col, y_col]].dropna()
-
-if plot_df.empty:
-    st.warning("No valid data points remain after filtering and type conversion.")
-    stop_app()
-
-st.subheader("2D Plot")
-if chart_type == "Line":
-    fig = px.line(plot_df, x=x_col, y=y_col)
-else:
-    fig = px.scatter(plot_df, x=x_col, y=y_col)
-
-fig.update_layout(
-    xaxis_title=x_col,
-    yaxis_title=y_col,
-    template="plotly_white",
-)
-
-st.plotly_chart(fig, use_container_width=True)
-st.caption(f"Showing {len(plot_df)} points from {len(filtered_df)} filtered rows.")
+if __name__ == "__main__":
+    app = CSVPlotterApp()
+    app.mainloop()
