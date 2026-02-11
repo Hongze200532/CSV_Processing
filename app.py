@@ -6,7 +6,9 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import numpy as np
 import pandas as pd
 
 if "seaborn-v0_8-whitegrid" in plt.style.available:
@@ -68,6 +70,17 @@ class CSVPlotterApp(tk.Tk):
         self.smooth_window_var = tk.StringVar(value="7")
         self.export_dpi_var = tk.StringVar(value="300")
         self.status_var = tk.StringVar(value="Select a CSV file to begin.")
+        self.hover_point_var = tk.StringVar(value="X: -- | Y: --")
+        self.peak_max_var = tk.StringVar(value="Max: --")
+        self.peak_min_var = tk.StringVar(value="Min: --")
+
+        self.current_plot_x_col = ""
+        self.current_plot_y_col = ""
+        self.current_plot_x_series: pd.Series | None = None
+        self.current_plot_y_series: pd.Series | None = None
+        self.current_plot_valid_idx: np.ndarray | None = None
+        self.current_plot_xy_pixels: np.ndarray | None = None
+        self.hover_snap_px = 14.0
 
         self._build_ui()
 
@@ -79,7 +92,7 @@ class CSVPlotterApp(tk.Tk):
         controls.pack(side=tk.LEFT, fill=tk.Y)
         controls.pack_propagate(False)
         controls.grid_columnconfigure(0, weight=1)
-        controls.grid_rowconfigure(22, weight=1)
+        controls.grid_rowconfigure(30, weight=1)
 
         ttk.Button(controls, text="Choose CSV", command=self.load_csv).grid(
             row=0, column=0, sticky="ew", pady=(0, 10)
@@ -144,6 +157,17 @@ class CSVPlotterApp(tk.Tk):
         ttk.Label(controls, textvariable=self.status_var, wraplength=260, justify="left").grid(
             row=22, column=0, sticky="sw"
         )
+        ttk.Label(controls, text="Hover Point").grid(row=23, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(controls, textvariable=self.hover_point_var, wraplength=260, justify="left").grid(
+            row=24, column=0, sticky="w"
+        )
+        ttk.Label(controls, text="Peaks").grid(row=25, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(controls, textvariable=self.peak_max_var, wraplength=260, justify="left").grid(
+            row=26, column=0, sticky="w"
+        )
+        ttk.Label(controls, textvariable=self.peak_min_var, wraplength=260, justify="left").grid(
+            row=27, column=0, sticky="w"
+        )
 
         self.right_panel = tk.Frame(main, bg="#efefef")
         self.right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -165,6 +189,7 @@ class CSVPlotterApp(tk.Tk):
         self.ax.set_facecolor("#ffffff")
         self.canvas = FigureCanvasTkAgg(self.fig, master=chart_frame)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        self.canvas.mpl_connect("motion_notify_event", self._on_plot_hover)
 
         if HAS_COCOA:
             self.bind("<Configure>", self._sync_blur_overlay)
@@ -359,6 +384,103 @@ class CSVPlotterApp(tk.Tk):
         window = int(max(1, round(float(num))))
         return min(window, max(1, data_len))
 
+    def _clear_plot_insights(self) -> None:
+        self.hover_point_var.set("X: -- | Y: --")
+        self.peak_max_var.set("Max: --")
+        self.peak_min_var.set("Min: --")
+        self.current_plot_x_col = ""
+        self.current_plot_y_col = ""
+        self.current_plot_x_series = None
+        self.current_plot_y_series = None
+        self.current_plot_valid_idx = None
+        self.current_plot_xy_pixels = None
+
+    def _format_axis_value(self, value) -> str:
+        if isinstance(value, pd.Timestamp):
+            return value.strftime("%Y-%m-%d %H:%M:%S").rstrip()
+        if hasattr(value, "item"):
+            try:
+                value = value.item()
+            except Exception:
+                pass
+        if isinstance(value, float):
+            return f"{value:.6g}"
+        return str(value)
+
+    def _update_peak_info(self, x_series: pd.Series, y_series: pd.Series) -> None:
+        y_numeric = pd.to_numeric(y_series, errors="coerce")
+        valid = y_numeric.notna()
+        if valid.sum() == 0:
+            self.peak_max_var.set("Max: --")
+            self.peak_min_var.set("Min: --")
+            return
+
+        y_valid = y_numeric.loc[valid].reset_index(drop=True)
+        x_valid = x_series.loc[valid].reset_index(drop=True)
+        max_idx = int(y_valid.idxmax())
+        min_idx = int(y_valid.idxmin())
+        self.peak_max_var.set(
+            f"Max: X={self._format_axis_value(x_valid.iloc[max_idx])}, Y={self._format_axis_value(y_valid.iloc[max_idx])}"
+        )
+        self.peak_min_var.set(
+            f"Min: X={self._format_axis_value(x_valid.iloc[min_idx])}, Y={self._format_axis_value(y_valid.iloc[min_idx])}"
+        )
+
+    def _update_hover_cache(self, x_series: pd.Series, y_series: pd.Series, x_col: str, y_col: str) -> None:
+        x_num = pd.to_numeric(x_series, errors="coerce")
+        if x_num.notna().mean() < 0.8:
+            x_dt = pd.to_datetime(x_series, errors="coerce")
+            if x_dt.notna().mean() >= 0.8:
+                x_num = pd.Series(mdates.date2num(x_dt.dt.to_pydatetime()), index=x_series.index)
+
+        y_num = pd.to_numeric(y_series, errors="coerce")
+        valid = x_num.notna() & y_num.notna()
+        if valid.sum() == 0:
+            self.current_plot_x_series = None
+            self.current_plot_y_series = None
+            self.current_plot_valid_idx = None
+            self.current_plot_xy_pixels = None
+            return
+
+        x_valid_num = x_num.loc[valid].to_numpy(dtype=float)
+        y_valid_num = y_num.loc[valid].to_numpy(dtype=float)
+        xy = np.column_stack([x_valid_num, y_valid_num])
+        self.current_plot_xy_pixels = self.ax.transData.transform(xy)
+        self.current_plot_valid_idx = np.flatnonzero(valid.to_numpy())
+        self.current_plot_x_series = x_series.reset_index(drop=True)
+        self.current_plot_y_series = y_series.reset_index(drop=True)
+        self.current_plot_x_col = x_col
+        self.current_plot_y_col = y_col
+
+    def _on_plot_hover(self, event) -> None:
+        if (
+            event is None
+            or event.inaxes != self.ax
+            or self.current_plot_xy_pixels is None
+            or self.current_plot_valid_idx is None
+            or self.current_plot_x_series is None
+            or self.current_plot_y_series is None
+            or event.x is None
+            or event.y is None
+        ):
+            self.hover_point_var.set("X: -- | Y: --")
+            return
+
+        delta = self.current_plot_xy_pixels - np.array([event.x, event.y])
+        dist2 = np.einsum("ij,ij->i", delta, delta)
+        nearest_i = int(np.argmin(dist2))
+        if float(np.sqrt(dist2[nearest_i])) > self.hover_snap_px:
+            self.hover_point_var.set("X: -- | Y: --")
+            return
+
+        src_idx = int(self.current_plot_valid_idx[nearest_i])
+        x_value = self.current_plot_x_series.iloc[src_idx]
+        y_value = self.current_plot_y_series.iloc[src_idx]
+        self.hover_point_var.set(
+            f"{self.current_plot_x_col}: {self._format_axis_value(x_value)} | "
+            f"{self.current_plot_y_col}: {self._format_axis_value(y_value)}"
+        )
+
     def _get_export_dpi(self) -> int:
         raw = self.export_dpi_var.get().strip()
         num = pd.to_numeric(pd.Series([raw]), errors="coerce").iloc[0]
@@ -429,6 +551,7 @@ class CSVPlotterApp(tk.Tk):
         self.manual_end_var.set("")
         self.on_x_period_change()
         self.has_plot = False
+        self._clear_plot_insights()
         self.show_blur_overlay()
 
         self.file_path_var.set(file_path)
@@ -504,7 +627,7 @@ class CSVPlotterApp(tk.Tk):
         self.ax.plot(
             plot_df[x_col],
             y_plot,
-            linewidth=1.15,
+            linewidth=0.85,
             antialiased=True,
             color="#1f77b4",
             solid_capstyle="round",
@@ -518,7 +641,9 @@ class CSVPlotterApp(tk.Tk):
         self.ax.grid(True, alpha=0.28, linestyle="-", linewidth=0.7)
         self.ax.margins(x=0.02, y=0.08)
         self.fig.autofmt_xdate()
-        self.canvas.draw_idle()
+        self._update_peak_info(plot_df[x_col], y_plot)
+        self.canvas.draw()
+        self._update_hover_cache(plot_df[x_col], y_plot, x_col, y_col)
         self.has_plot = True
         self.hide_blur_overlay()
 
