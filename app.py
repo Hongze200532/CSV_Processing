@@ -1,11 +1,27 @@
 import io
 from pathlib import Path
+import sys
+import importlib.util
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import pandas as pd
+
+HAS_COCOA = sys.platform == "darwin" and importlib.util.find_spec("AppKit") is not None
+
+if HAS_COCOA:
+    from AppKit import (
+        NSApp,
+        NSMakeRect,
+        NSViewHeightSizable,
+        NSViewWidthSizable,
+        NSVisualEffectBlendingModeBehindWindow,
+        NSVisualEffectMaterialSidebar,
+        NSVisualEffectStateActive,
+        NSVisualEffectView,
+    )
 
 
 class CSVPlotterApp(tk.Tk):
@@ -26,6 +42,8 @@ class CSVPlotterApp(tk.Tk):
         self.df: pd.DataFrame | None = None
         self.blur_overlay: tk.Canvas | None = None
         self.has_plot = False
+        self.right_panel: tk.Frame | None = None
+        self.native_blur_view = None
 
         self.file_path_var = tk.StringVar(value="No file selected")
         self.x_var = tk.StringVar()
@@ -91,10 +109,10 @@ class CSVPlotterApp(tk.Tk):
             row=12, column=0, sticky="sw"
         )
 
-        right_panel = tk.Frame(main, bg="#efefef")
-        right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.right_panel = tk.Frame(main, bg="#efefef")
+        self.right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        content = ttk.Panedwindow(right_panel, orient=tk.HORIZONTAL)
+        content = ttk.Panedwindow(self.right_panel, orient=tk.HORIZONTAL)
         content.pack(fill=tk.BOTH, expand=True)
 
         preview_frame = ttk.Frame(content, padding=(0, 8, 8, 8))
@@ -110,28 +128,80 @@ class CSVPlotterApp(tk.Tk):
         self.canvas = FigureCanvasTkAgg(self.fig, master=chart_frame)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-        # Simulated blur layer on the non-control area.
-        self.blur_overlay = tk.Canvas(
-            right_panel,
-            highlightthickness=0,
-            bd=0,
-            bg="#d9d9d9",
-        )
-        self.blur_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
-        self.blur_overlay.bind("<Configure>", self._redraw_blur_overlay)
-        self._redraw_blur_overlay()
+        if HAS_COCOA:
+            self.bind("<Configure>", self._sync_blur_overlay)
+            self.after(120, self._ensure_native_blur_overlay)
+        else:
+            # Fallback blur-like layer for non-macOS environments.
+            self.blur_overlay = tk.Canvas(
+                self.right_panel,
+                highlightthickness=0,
+                bd=0,
+                bg="#d9d9d9",
+            )
+            self.blur_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
+            self.blur_overlay.bind("<Configure>", self._redraw_blur_overlay)
+            self._redraw_blur_overlay()
         self.show_blur_overlay()
 
     def show_blur_overlay(self) -> None:
-        if self.blur_overlay is None:
+        if HAS_COCOA:
+            self._ensure_native_blur_overlay()
+            if self.native_blur_view is not None:
+                self.native_blur_view.setHidden_(False)
+                self._sync_blur_overlay()
             return
-        self.blur_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
-        self.blur_overlay.lift()
+        if self.blur_overlay is not None:
+            self.blur_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
+            self.blur_overlay.lift()
 
     def hide_blur_overlay(self) -> None:
-        if self.blur_overlay is None:
+        if HAS_COCOA:
+            if self.native_blur_view is not None:
+                self.native_blur_view.setHidden_(True)
             return
-        self.blur_overlay.place_forget()
+        if self.blur_overlay is not None:
+            self.blur_overlay.place_forget()
+
+    def _ensure_native_blur_overlay(self) -> None:
+        if not HAS_COCOA or self.native_blur_view is not None or self.right_panel is None:
+            return
+
+        app = NSApp()
+        if app is None:
+            self.after(120, self._ensure_native_blur_overlay)
+            return
+
+        window = app.mainWindow()
+        if window is None:
+            windows = app.windows()
+            if windows and len(windows) > 0:
+                window = windows[0]
+        if window is None:
+            self.after(120, self._ensure_native_blur_overlay)
+            return
+
+        content_view = window.contentView()
+        self.native_blur_view = NSVisualEffectView.alloc().initWithFrame_(NSMakeRect(0, 0, 10, 10))
+        self.native_blur_view.setMaterial_(NSVisualEffectMaterialSidebar)
+        self.native_blur_view.setBlendingMode_(NSVisualEffectBlendingModeBehindWindow)
+        self.native_blur_view.setState_(NSVisualEffectStateActive)
+        self.native_blur_view.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
+        content_view.addSubview_(self.native_blur_view)
+        self._sync_blur_overlay()
+
+    def _sync_blur_overlay(self, _event: tk.Event | None = None) -> None:
+        if not HAS_COCOA or self.native_blur_view is None or self.right_panel is None:
+            return
+
+        self.update_idletasks()
+        x = self.right_panel.winfo_x()
+        y_top = self.right_panel.winfo_y()
+        width = max(1, self.right_panel.winfo_width())
+        height = max(1, self.right_panel.winfo_height())
+        root_height = max(1, self.winfo_height())
+        cocoa_y = max(0, root_height - y_top - height)
+        self.native_blur_view.setFrame_(NSMakeRect(x, cocoa_y, width, height))
 
     def _redraw_blur_overlay(self, _event: tk.Event | None = None) -> None:
         if self.blur_overlay is None:
