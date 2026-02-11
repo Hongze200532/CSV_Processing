@@ -84,99 +84,223 @@ class CSVPlotterApp(tk.Tk):
         self.current_plot_xy_pixels: np.ndarray | None = None
         self.hover_snap_px = 14.0
 
+        self._setup_styles()
         self._build_ui()
+
+    def _setup_styles(self) -> None:
+        self.configure(bg="#edf2f7")
+        style = ttk.Style(self)
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+
+        style.configure("CardInput.TCombobox", padding=4)
+        style.configure("CardInput.TEntry", padding=4)
+        style.configure(
+            "Primary.TButton",
+            font=("SF Pro Text", 10, "bold"),
+            padding=(10, 7),
+            foreground="#ffffff",
+            background="#111827",
+            borderwidth=0,
+        )
+        style.map(
+            "Primary.TButton",
+            background=[("active", "#0f172a"), ("pressed", "#0b1220")],
+            foreground=[("disabled", "#d1d5db"), ("!disabled", "#ffffff")],
+        )
+        style.configure(
+            "Secondary.TButton",
+            font=("SF Pro Text", 9),
+            padding=(10, 7),
+            foreground="#111827",
+            background="#e5e7eb",
+            borderwidth=0,
+        )
+        style.map(
+            "Secondary.TButton",
+            background=[("active", "#d1d5db"), ("pressed", "#c7cdd6")],
+            foreground=[("disabled", "#9ca3af"), ("!disabled", "#111827")],
+        )
+
+    def _make_sidebar_card(self, parent: tk.Widget, title: str) -> tuple[tk.Frame, tk.Frame]:
+        card = tk.Frame(parent, bg="#ffffff", highlightthickness=1, highlightbackground="#dbe3ec")
+        card.pack(fill=tk.X, padx=10, pady=6)
+        title_label = tk.Label(
+            card,
+            text=title,
+            bg="#ffffff",
+            fg="#0f172a",
+            font=("SF Pro Display", 10, "bold"),
+            anchor="w",
+        )
+        title_label.pack(fill=tk.X, padx=12, pady=(10, 6))
+        inner = tk.Frame(card, bg="#ffffff")
+        inner.pack(fill=tk.X, padx=10, pady=(0, 10))
+        return card, inner
 
     def _build_ui(self) -> None:
         main = ttk.Frame(self, padding=12)
         main.pack(fill=tk.BOTH, expand=True)
 
-        controls = ttk.Frame(main, padding=(0, 0, 12, 0), width=300)
+        controls = tk.Frame(main, bg="#eaf0f6", width=340)
         controls.pack(side=tk.LEFT, fill=tk.Y)
         controls.pack_propagate(False)
-        controls.grid_columnconfigure(0, weight=1)
-        controls.grid_rowconfigure(30, weight=1)
 
-        ttk.Button(controls, text="Choose CSV(s)", command=self.load_csv).grid(
-            row=0, column=0, sticky="ew", pady=(0, 10)
-        )
-        ttk.Label(controls, text="File").grid(row=1, column=0, sticky="w")
-        ttk.Label(
-            controls,
-            textvariable=self.file_path_var,
-            wraplength=260,
+        header = tk.Frame(controls, bg="#ffffff", highlightthickness=1, highlightbackground="#dbe3ec")
+        header.pack(fill=tk.X, padx=10, pady=(6, 8))
+        tk.Label(
+            header,
+            text="CSV Plot Studio",
+            bg="#ffffff",
+            fg="#0b1220",
+            font=("SF Pro Display", 14, "bold"),
+            anchor="w",
+        ).pack(fill=tk.X, padx=12, pady=(10, 2))
+        tk.Label(
+            header,
+            text="Clean analysis workflow inspired by OpenAI + AppleOS.",
+            bg="#ffffff",
+            fg="#475569",
+            font=("SF Pro Text", 9),
+            anchor="w",
             justify="left",
-        ).grid(row=2, column=0, sticky="w", pady=(2, 10))
+            wraplength=300,
+        ).pack(fill=tk.X, padx=12, pady=(0, 10))
 
-        ttk.Label(controls, text="X variable").grid(row=3, column=0, sticky="w")
-        self.x_combo = ttk.Combobox(controls, textvariable=self.x_var, state="readonly")
-        self.x_combo.grid(row=4, column=0, sticky="ew", pady=(2, 10))
-
-        ttk.Label(controls, text="Y variable").grid(row=5, column=0, sticky="w")
-        self.y_combo = ttk.Combobox(controls, textvariable=self.y_var, state="readonly")
-        self.y_combo.grid(row=6, column=0, sticky="ew", pady=(2, 10))
-
-        ttk.Label(controls, text="X period").grid(row=7, column=0, sticky="w")
-        self.x_period_combo = ttk.Combobox(
-            controls,
-            textvariable=self.x_period_var,
-            state="readonly",
-            values=self.X_PERIOD_OPTIONS,
+        _, source_inner = self._make_sidebar_card(controls, "Data Source")
+        source_inner.columnconfigure(0, weight=1)
+        ttk.Button(source_inner, text="Choose CSV(s)", style="Primary.TButton", command=self.load_csv).grid(
+            row=0, column=0, sticky="ew", pady=(0, 8)
         )
-        self.x_period_combo.grid(row=8, column=0, sticky="ew", pady=(2, 10))
-        self.x_period_combo.bind("<<ComboboxSelected>>", self.on_x_period_change)
+        tk.Label(
+            source_inner,
+            textvariable=self.file_path_var,
+            bg="#ffffff",
+            fg="#334155",
+            font=("SF Pro Text", 9),
+            justify="left",
+            wraplength=300,
+            anchor="w",
+        ).grid(row=1, column=0, sticky="ew")
 
-        ttk.Label(controls, text="Start X (manual)").grid(row=9, column=0, sticky="w")
-        self.manual_start_entry = ttk.Entry(controls, textvariable=self.manual_start_var, state="disabled")
-        self.manual_start_entry.grid(row=10, column=0, sticky="ew", pady=(2, 10))
-
-        ttk.Label(controls, text="End X (manual)").grid(row=11, column=0, sticky="w")
-        self.manual_end_entry = ttk.Entry(controls, textvariable=self.manual_end_var, state="disabled")
-        self.manual_end_entry.grid(row=12, column=0, sticky="ew", pady=(2, 10))
-
-        ttk.Label(controls, text="Plot mode").grid(row=13, column=0, sticky="w")
+        _, vars_inner = self._make_sidebar_card(controls, "Variables & Mode")
+        vars_inner.columnconfigure(0, weight=1)
+        ttk.Label(vars_inner, text="X variable").grid(row=0, column=0, sticky="w")
+        self.x_combo = ttk.Combobox(vars_inner, textvariable=self.x_var, state="readonly", style="CardInput.TCombobox")
+        self.x_combo.grid(row=1, column=0, sticky="ew", pady=(2, 8))
+        ttk.Label(vars_inner, text="Y variable").grid(row=2, column=0, sticky="w")
+        self.y_combo = ttk.Combobox(vars_inner, textvariable=self.y_var, state="readonly", style="CardInput.TCombobox")
+        self.y_combo.grid(row=3, column=0, sticky="ew", pady=(2, 8))
+        ttk.Label(vars_inner, text="Plot mode").grid(row=4, column=0, sticky="w")
         self.plot_mode_combo = ttk.Combobox(
-            controls,
+            vars_inner,
             textvariable=self.plot_mode_var,
             state="readonly",
             values=["Overlay (One Chart)", "Separate Subplots"],
+            style="CardInput.TCombobox",
         )
-        self.plot_mode_combo.grid(row=14, column=0, sticky="ew", pady=(2, 10))
+        self.plot_mode_combo.grid(row=5, column=0, sticky="ew", pady=(2, 0))
 
+        _, period_inner = self._make_sidebar_card(controls, "X Period")
+        period_inner.columnconfigure(0, weight=1)
+        ttk.Label(period_inner, text="X period").grid(row=0, column=0, sticky="w")
+        self.x_period_combo = ttk.Combobox(
+            period_inner,
+            textvariable=self.x_period_var,
+            state="readonly",
+            values=self.X_PERIOD_OPTIONS,
+            style="CardInput.TCombobox",
+        )
+        self.x_period_combo.grid(row=1, column=0, sticky="ew", pady=(2, 8))
+        self.x_period_combo.bind("<<ComboboxSelected>>", self.on_x_period_change)
+        ttk.Label(period_inner, text="Start X (manual)").grid(row=2, column=0, sticky="w")
+        self.manual_start_entry = ttk.Entry(period_inner, textvariable=self.manual_start_var, state="disabled", style="CardInput.TEntry")
+        self.manual_start_entry.grid(row=3, column=0, sticky="ew", pady=(2, 8))
+        ttk.Label(period_inner, text="End X (manual)").grid(row=4, column=0, sticky="w")
+        self.manual_end_entry = ttk.Entry(period_inner, textvariable=self.manual_end_var, state="disabled", style="CardInput.TEntry")
+        self.manual_end_entry.grid(row=5, column=0, sticky="ew")
+
+        _, render_inner = self._make_sidebar_card(controls, "Render & Export")
+        render_inner.columnconfigure(0, weight=1)
         ttk.Checkbutton(
-            controls,
+            render_inner,
             text="Smooth line",
             variable=self.smooth_line_var,
-        ).grid(row=15, column=0, sticky="w")
-        ttk.Entry(controls, textvariable=self.smooth_window_var).grid(
-            row=16, column=0, sticky="ew", pady=(2, 10)
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Entry(render_inner, textvariable=self.smooth_window_var, style="CardInput.TEntry").grid(
+            row=1, column=0, sticky="ew", pady=(2, 8)
+        )
+        ttk.Label(render_inner, text="Export DPI").grid(row=2, column=0, sticky="w")
+        ttk.Entry(render_inner, textvariable=self.export_dpi_var, style="CardInput.TEntry").grid(
+            row=3, column=0, sticky="ew", pady=(2, 10)
+        )
+        ttk.Button(render_inner, text="Plot", style="Primary.TButton", command=self.plot_data).grid(
+            row=4, column=0, sticky="ew", pady=(0, 6)
+        )
+        ttk.Button(render_inner, text="Export Plot PNG", style="Secondary.TButton", command=self.export_plot).grid(
+            row=5, column=0, sticky="ew"
         )
 
-        ttk.Label(controls, text="Export DPI").grid(row=17, column=0, sticky="w")
-        ttk.Entry(controls, textvariable=self.export_dpi_var).grid(
-            row=18, column=0, sticky="ew", pady=(2, 10)
-        )
-
-        ttk.Button(controls, text="Plot", command=self.plot_data).grid(
-            row=19, column=0, sticky="ew", pady=(6, 6)
-        )
-        ttk.Button(controls, text="Export Plot PNG", command=self.export_plot).grid(
-            row=20, column=0, sticky="ew", pady=(0, 10)
-        )
-
-        ttk.Label(controls, textvariable=self.status_var, wraplength=260, justify="left").grid(
-            row=22, column=0, sticky="sw"
-        )
-        ttk.Label(controls, text="Hover Point").grid(row=23, column=0, sticky="w", pady=(8, 0))
-        ttk.Label(controls, textvariable=self.hover_point_var, wraplength=260, justify="left").grid(
-            row=24, column=0, sticky="w"
-        )
-        ttk.Label(controls, text="Peaks").grid(row=25, column=0, sticky="w", pady=(8, 0))
-        ttk.Label(controls, textvariable=self.peak_max_var, wraplength=260, justify="left").grid(
-            row=26, column=0, sticky="w"
-        )
-        ttk.Label(controls, textvariable=self.peak_min_var, wraplength=260, justify="left").grid(
-            row=27, column=0, sticky="w"
-        )
+        _, insight_inner = self._make_sidebar_card(controls, "Insights")
+        insight_inner.columnconfigure(0, weight=1)
+        tk.Label(
+            insight_inner,
+            textvariable=self.status_var,
+            bg="#ffffff",
+            fg="#1f2937",
+            font=("SF Pro Text", 9),
+            wraplength=300,
+            justify="left",
+            anchor="w",
+        ).grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        tk.Label(
+            insight_inner,
+            text="Hover Point",
+            bg="#ffffff",
+            fg="#64748b",
+            font=("SF Pro Text", 8, "bold"),
+            anchor="w",
+        ).grid(row=1, column=0, sticky="w")
+        tk.Label(
+            insight_inner,
+            textvariable=self.hover_point_var,
+            bg="#ffffff",
+            fg="#334155",
+            font=("SF Pro Text", 9),
+            wraplength=300,
+            justify="left",
+            anchor="w",
+        ).grid(row=2, column=0, sticky="ew", pady=(0, 6))
+        tk.Label(
+            insight_inner,
+            text="Peaks",
+            bg="#ffffff",
+            fg="#64748b",
+            font=("SF Pro Text", 8, "bold"),
+            anchor="w",
+        ).grid(row=3, column=0, sticky="w")
+        tk.Label(
+            insight_inner,
+            textvariable=self.peak_max_var,
+            bg="#ffffff",
+            fg="#334155",
+            font=("SF Pro Text", 9),
+            wraplength=300,
+            justify="left",
+            anchor="w",
+        ).grid(row=4, column=0, sticky="ew")
+        tk.Label(
+            insight_inner,
+            textvariable=self.peak_min_var,
+            bg="#ffffff",
+            fg="#334155",
+            font=("SF Pro Text", 9),
+            wraplength=300,
+            justify="left",
+            anchor="w",
+        ).grid(row=5, column=0, sticky="ew")
 
         self.right_panel = tk.Frame(main, bg="#efefef")
         self.right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
