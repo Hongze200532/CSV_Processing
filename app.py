@@ -56,8 +56,8 @@ class CSVPlotterApp(tk.Tk):
         self.geometry("1400x860")
 
         self.data_frames: dict[str, pd.DataFrame] = {}
-        self.blur_overlay: tk.Canvas | None = None
         self.has_plot = False
+        self.controls_panel: ttk.Frame | None = None
         self.right_panel: tk.Frame | None = None
         self.native_blur_view = None
 
@@ -95,6 +95,7 @@ class CSVPlotterApp(tk.Tk):
         controls.pack_propagate(False)
         controls.grid_columnconfigure(0, weight=1)
         controls.grid_rowconfigure(30, weight=1)
+        self.controls_panel = controls
 
         ttk.Button(controls, text="Choose CSV(s)", command=self.load_csv).grid(
             row=0, column=0, sticky="ew", pady=(0, 10)
@@ -202,20 +203,9 @@ class CSVPlotterApp(tk.Tk):
 
         if HAS_COCOA:
             self.bind("<Configure>", self._sync_blur_overlay)
-            self.right_panel.bind("<Configure>", self._sync_blur_overlay)
+            self.controls_panel.bind("<Configure>", self._sync_blur_overlay)
             self.after(120, self._ensure_native_blur_overlay)
-        else:
-            # Fallback blur-like layer for non-macOS environments.
-            self.blur_overlay = tk.Canvas(
-                self.right_panel,
-                highlightthickness=0,
-                bd=0,
-                bg="#d9d9d9",
-            )
-            self.blur_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
-            self.blur_overlay.bind("<Configure>", self._redraw_blur_overlay)
-            self._redraw_blur_overlay()
-        self.show_blur_overlay()
+            self.show_blur_overlay()
 
     def show_blur_overlay(self) -> None:
         if HAS_COCOA:
@@ -223,21 +213,14 @@ class CSVPlotterApp(tk.Tk):
             if self.native_blur_view is not None:
                 self.native_blur_view.setHidden_(False)
                 self._sync_blur_overlay()
-            return
-        if self.blur_overlay is not None:
-            self.blur_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
-            self.blur_overlay.lift()
+        return
 
     def hide_blur_overlay(self) -> None:
-        if HAS_COCOA:
-            if self.native_blur_view is not None:
-                self.native_blur_view.setHidden_(True)
-            return
-        if self.blur_overlay is not None:
-            self.blur_overlay.place_forget()
+        # Left sidebar frosted glass should always stay visible.
+        self.show_blur_overlay()
 
     def _ensure_native_blur_overlay(self) -> None:
-        if not HAS_COCOA or self.native_blur_view is not None or self.right_panel is None:
+        if not HAS_COCOA or self.native_blur_view is not None or self.controls_panel is None:
             return
 
         app = NSApp()
@@ -259,47 +242,23 @@ class CSVPlotterApp(tk.Tk):
         self.native_blur_view.setMaterial_(NSVisualEffectMaterialSidebar)
         self.native_blur_view.setBlendingMode_(NSVisualEffectBlendingModeBehindWindow)
         self.native_blur_view.setState_(NSVisualEffectStateActive)
+        self.native_blur_view.setIgnoresMouseEvents_(True)
         self.native_blur_view.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
         content_view.addSubview_(self.native_blur_view)
         self._sync_blur_overlay()
 
     def _sync_blur_overlay(self, _event: tk.Event | None = None) -> None:
-        if not HAS_COCOA or self.native_blur_view is None or self.right_panel is None:
+        if not HAS_COCOA or self.native_blur_view is None or self.controls_panel is None:
             return
 
         self.update_idletasks()
-        x = self.right_panel.winfo_x()
-        y_top = self.right_panel.winfo_y()
-        width = max(1, self.right_panel.winfo_width())
-        height = max(1, self.right_panel.winfo_height())
+        x = self.controls_panel.winfo_x()
+        y_top = self.controls_panel.winfo_y()
+        width = max(1, self.controls_panel.winfo_width())
+        height = max(1, self.controls_panel.winfo_height())
         root_height = max(1, self.winfo_height())
         cocoa_y = max(0, root_height - y_top - height)
         self.native_blur_view.setFrame_(NSMakeRect(x, cocoa_y, width, height))
-
-    def _redraw_blur_overlay(self, _event: tk.Event | None = None) -> None:
-        if self.blur_overlay is None:
-            return
-        width = max(1, self.blur_overlay.winfo_width())
-        height = max(1, self.blur_overlay.winfo_height())
-        self.blur_overlay.delete("all")
-        self.blur_overlay.create_rectangle(
-            0,
-            0,
-            width,
-            height,
-            fill="#f3f3f3",
-            outline="",
-            stipple="gray50",
-        )
-        self.blur_overlay.create_rectangle(
-            0,
-            0,
-            width,
-            height,
-            fill="#ffffff",
-            outline="",
-            stipple="gray25",
-        )
 
     def on_x_period_change(self, _event: tk.Event | None = None) -> None:
         manual_mode = self.x_period_var.get() == "Manual Range"
