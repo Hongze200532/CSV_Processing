@@ -88,81 +88,169 @@ class CSVPlotterApp(tk.Tk):
         self._build_ui()
 
     def _setup_styles(self) -> None:
-        self.configure(bg="#edf2f7")
+        self.colors = {
+            "root_bg": "#070b11",
+            "sidebar_bg": "#0b121b",
+            "card_bg": "#101a27",
+            "card_border": "#263446",
+            "title_fg": "#e5eef9",
+            "text_fg": "#c7d4e3",
+            "muted_fg": "#8fa3b8",
+            "accent": "#10a37f",
+            "accent_active": "#0f8f70",
+            "accent_pressed": "#0b775d",
+            "secondary_bg": "#1b2838",
+            "secondary_active": "#23374d",
+            "secondary_pressed": "#1a2c3f",
+            "input_bg": "#0d1622",
+            "input_fg": "#d8e5f4",
+            "plot_bg": "#09111b",
+            "axes_bg": "#0f1a28",
+            "grid": "#2a3a4f",
+            "spine": "#364a63",
+            "plot_text": "#d5e2f1",
+        }
+
+        self.configure(bg=self.colors["root_bg"])
         style = ttk.Style(self)
         try:
             style.theme_use("clam")
         except Exception:
             pass
 
-        style.configure("CardInput.TCombobox", padding=4)
-        style.configure("CardInput.TEntry", padding=4)
+        style.configure("TFrame", background=self.colors["root_bg"])
+        style.configure(
+            "TLabel",
+            background=self.colors["root_bg"],
+            foreground=self.colors["text_fg"],
+            font=("SF Pro Text", 9),
+        )
+        style.configure(
+            "Card.TLabel",
+            background=self.colors["card_bg"],
+            foreground=self.colors["text_fg"],
+            font=("SF Pro Text", 9),
+        )
+        style.configure("TPanedwindow", background=self.colors["root_bg"])
+        style.configure(
+            "CardInput.TCombobox",
+            padding=4,
+            foreground=self.colors["input_fg"],
+            fieldbackground=self.colors["input_bg"],
+            background=self.colors["input_bg"],
+            borderwidth=1,
+            relief="solid",
+            arrowsize=12,
+        )
+        style.map(
+            "CardInput.TCombobox",
+            fieldbackground=[("readonly", self.colors["input_bg"])],
+            foreground=[("readonly", self.colors["input_fg"])],
+            selectbackground=[("readonly", self.colors["secondary_bg"])],
+            selectforeground=[("readonly", self.colors["input_fg"])],
+        )
+        style.configure(
+            "CardInput.TEntry",
+            padding=4,
+            foreground=self.colors["input_fg"],
+            fieldbackground=self.colors["input_bg"],
+            background=self.colors["input_bg"],
+            borderwidth=1,
+            relief="solid",
+        )
+        style.configure(
+            "Card.TCheckbutton",
+            background=self.colors["card_bg"],
+            foreground=self.colors["text_fg"],
+            font=("SF Pro Text", 9),
+        )
+        style.map(
+            "Card.TCheckbutton",
+            background=[("active", self.colors["card_bg"])],
+            foreground=[("disabled", self.colors["muted_fg"]), ("!disabled", self.colors["text_fg"])],
+        )
         style.configure(
             "Primary.TButton",
             font=("SF Pro Text", 10, "bold"),
             padding=(10, 7),
             foreground="#ffffff",
-            background="#111827",
+            background=self.colors["accent"],
             borderwidth=0,
         )
         style.map(
             "Primary.TButton",
-            background=[("active", "#0f172a"), ("pressed", "#0b1220")],
+            background=[
+                ("active", self.colors["accent_active"]),
+                ("pressed", self.colors["accent_pressed"]),
+            ],
             foreground=[("disabled", "#d1d5db"), ("!disabled", "#ffffff")],
         )
         style.configure(
             "Secondary.TButton",
             font=("SF Pro Text", 9),
             padding=(10, 7),
-            foreground="#111827",
-            background="#e5e7eb",
+            foreground=self.colors["text_fg"],
+            background=self.colors["secondary_bg"],
             borderwidth=0,
         )
         style.map(
             "Secondary.TButton",
-            background=[("active", "#d1d5db"), ("pressed", "#c7cdd6")],
-            foreground=[("disabled", "#9ca3af"), ("!disabled", "#111827")],
+            background=[
+                ("active", self.colors["secondary_active"]),
+                ("pressed", self.colors["secondary_pressed"]),
+            ],
+            foreground=[("disabled", self.colors["muted_fg"]), ("!disabled", self.colors["text_fg"])],
         )
 
     def _make_sidebar_card(self, parent: tk.Widget, title: str) -> tuple[tk.Frame, tk.Frame]:
-        card = tk.Frame(parent, bg="#ffffff", highlightthickness=1, highlightbackground="#dbe3ec")
+        card = tk.Frame(
+            parent,
+            bg=self.colors["card_bg"],
+            highlightthickness=1,
+            highlightbackground=self.colors["card_border"],
+        )
         card.pack(fill=tk.X, padx=10, pady=6)
         title_label = tk.Label(
             card,
             text=title,
-            bg="#ffffff",
-            fg="#0f172a",
+            bg=self.colors["card_bg"],
+            fg=self.colors["title_fg"],
             font=("SF Pro Display", 10, "bold"),
             anchor="w",
         )
         title_label.pack(fill=tk.X, padx=12, pady=(10, 6))
-        inner = tk.Frame(card, bg="#ffffff")
+        inner = tk.Frame(card, bg=self.colors["card_bg"])
         inner.pack(fill=tk.X, padx=10, pady=(0, 10))
         return card, inner
 
     def _build_ui(self) -> None:
-        main = ttk.Frame(self, padding=12)
-        main.pack(fill=tk.BOTH, expand=True)
+        main = tk.Frame(self, bg=self.colors["root_bg"], bd=0, highlightthickness=0)
+        main.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
 
-        controls = tk.Frame(main, bg="#eaf0f6", width=340, bd=0, highlightthickness=0)
+        controls = tk.Frame(main, bg=self.colors["sidebar_bg"], width=340, bd=0, highlightthickness=0)
         controls.pack(side=tk.LEFT, fill=tk.Y)
         controls.pack_propagate(False)
 
-        header = tk.Frame(controls, bg="#ffffff", highlightthickness=1, highlightbackground="#dbe3ec")
+        header = tk.Frame(
+            controls,
+            bg=self.colors["card_bg"],
+            highlightthickness=1,
+            highlightbackground=self.colors["card_border"],
+        )
         header.pack(fill=tk.X, padx=10, pady=(6, 8))
         tk.Label(
             header,
             text="CSV Plot Studio",
-            bg="#ffffff",
-            fg="#0b1220",
+            bg=self.colors["card_bg"],
+            fg=self.colors["title_fg"],
             font=("SF Pro Display", 14, "bold"),
             anchor="w",
         ).pack(fill=tk.X, padx=12, pady=(10, 2))
         tk.Label(
             header,
             text="Clean analysis workflow inspired by OpenAI + AppleOS.",
-            bg="#ffffff",
-            fg="#475569",
+            bg=self.colors["card_bg"],
+            fg=self.colors["muted_fg"],
             font=("SF Pro Text", 9),
             anchor="w",
             justify="left",
@@ -177,8 +265,8 @@ class CSVPlotterApp(tk.Tk):
         tk.Label(
             source_inner,
             textvariable=self.file_path_var,
-            bg="#ffffff",
-            fg="#334155",
+            bg=self.colors["card_bg"],
+            fg=self.colors["text_fg"],
             font=("SF Pro Text", 9),
             justify="left",
             wraplength=300,
@@ -187,13 +275,13 @@ class CSVPlotterApp(tk.Tk):
 
         _, vars_inner = self._make_sidebar_card(controls, "Variables & Mode")
         vars_inner.columnconfigure(0, weight=1)
-        ttk.Label(vars_inner, text="X variable").grid(row=0, column=0, sticky="w")
+        ttk.Label(vars_inner, text="X variable", style="Card.TLabel").grid(row=0, column=0, sticky="w")
         self.x_combo = ttk.Combobox(vars_inner, textvariable=self.x_var, state="readonly", style="CardInput.TCombobox")
         self.x_combo.grid(row=1, column=0, sticky="ew", pady=(2, 8))
-        ttk.Label(vars_inner, text="Y variable").grid(row=2, column=0, sticky="w")
+        ttk.Label(vars_inner, text="Y variable", style="Card.TLabel").grid(row=2, column=0, sticky="w")
         self.y_combo = ttk.Combobox(vars_inner, textvariable=self.y_var, state="readonly", style="CardInput.TCombobox")
         self.y_combo.grid(row=3, column=0, sticky="ew", pady=(2, 8))
-        ttk.Label(vars_inner, text="Plot mode").grid(row=4, column=0, sticky="w")
+        ttk.Label(vars_inner, text="Plot mode", style="Card.TLabel").grid(row=4, column=0, sticky="w")
         self.plot_mode_combo = ttk.Combobox(
             vars_inner,
             textvariable=self.plot_mode_var,
@@ -205,7 +293,7 @@ class CSVPlotterApp(tk.Tk):
 
         _, period_inner = self._make_sidebar_card(controls, "X Period")
         period_inner.columnconfigure(0, weight=1)
-        ttk.Label(period_inner, text="X period").grid(row=0, column=0, sticky="w")
+        ttk.Label(period_inner, text="X period", style="Card.TLabel").grid(row=0, column=0, sticky="w")
         self.x_period_combo = ttk.Combobox(
             period_inner,
             textvariable=self.x_period_var,
@@ -215,10 +303,10 @@ class CSVPlotterApp(tk.Tk):
         )
         self.x_period_combo.grid(row=1, column=0, sticky="ew", pady=(2, 8))
         self.x_period_combo.bind("<<ComboboxSelected>>", self.on_x_period_change)
-        ttk.Label(period_inner, text="Start X (manual)").grid(row=2, column=0, sticky="w")
+        ttk.Label(period_inner, text="Start X (manual)", style="Card.TLabel").grid(row=2, column=0, sticky="w")
         self.manual_start_entry = ttk.Entry(period_inner, textvariable=self.manual_start_var, state="disabled", style="CardInput.TEntry")
         self.manual_start_entry.grid(row=3, column=0, sticky="ew", pady=(2, 8))
-        ttk.Label(period_inner, text="End X (manual)").grid(row=4, column=0, sticky="w")
+        ttk.Label(period_inner, text="End X (manual)", style="Card.TLabel").grid(row=4, column=0, sticky="w")
         self.manual_end_entry = ttk.Entry(period_inner, textvariable=self.manual_end_var, state="disabled", style="CardInput.TEntry")
         self.manual_end_entry.grid(row=5, column=0, sticky="ew")
 
@@ -228,11 +316,12 @@ class CSVPlotterApp(tk.Tk):
             render_inner,
             text="Smooth line",
             variable=self.smooth_line_var,
+            style="Card.TCheckbutton",
         ).grid(row=0, column=0, sticky="w")
         ttk.Entry(render_inner, textvariable=self.smooth_window_var, style="CardInput.TEntry").grid(
             row=1, column=0, sticky="ew", pady=(2, 8)
         )
-        ttk.Label(render_inner, text="Export DPI").grid(row=2, column=0, sticky="w")
+        ttk.Label(render_inner, text="Export DPI", style="Card.TLabel").grid(row=2, column=0, sticky="w")
         ttk.Entry(render_inner, textvariable=self.export_dpi_var, style="CardInput.TEntry").grid(
             row=3, column=0, sticky="ew", pady=(2, 10)
         )
@@ -248,8 +337,8 @@ class CSVPlotterApp(tk.Tk):
         tk.Label(
             insight_inner,
             textvariable=self.status_var,
-            bg="#ffffff",
-            fg="#1f2937",
+            bg=self.colors["card_bg"],
+            fg=self.colors["text_fg"],
             font=("SF Pro Text", 9),
             wraplength=300,
             justify="left",
@@ -258,16 +347,16 @@ class CSVPlotterApp(tk.Tk):
         tk.Label(
             insight_inner,
             text="Hover Point",
-            bg="#ffffff",
-            fg="#64748b",
+            bg=self.colors["card_bg"],
+            fg=self.colors["muted_fg"],
             font=("SF Pro Text", 8, "bold"),
             anchor="w",
         ).grid(row=1, column=0, sticky="w")
         tk.Label(
             insight_inner,
             textvariable=self.hover_point_var,
-            bg="#ffffff",
-            fg="#334155",
+            bg=self.colors["card_bg"],
+            fg=self.colors["text_fg"],
             font=("SF Pro Text", 9),
             wraplength=300,
             justify="left",
@@ -276,16 +365,16 @@ class CSVPlotterApp(tk.Tk):
         tk.Label(
             insight_inner,
             text="Peaks",
-            bg="#ffffff",
-            fg="#64748b",
+            bg=self.colors["card_bg"],
+            fg=self.colors["muted_fg"],
             font=("SF Pro Text", 8, "bold"),
             anchor="w",
         ).grid(row=3, column=0, sticky="w")
         tk.Label(
             insight_inner,
             textvariable=self.peak_max_var,
-            bg="#ffffff",
-            fg="#334155",
+            bg=self.colors["card_bg"],
+            fg=self.colors["text_fg"],
             font=("SF Pro Text", 9),
             wraplength=300,
             justify="left",
@@ -294,19 +383,23 @@ class CSVPlotterApp(tk.Tk):
         tk.Label(
             insight_inner,
             textvariable=self.peak_min_var,
-            bg="#ffffff",
-            fg="#334155",
+            bg=self.colors["card_bg"],
+            fg=self.colors["text_fg"],
             font=("SF Pro Text", 9),
             wraplength=300,
             justify="left",
             anchor="w",
         ).grid(row=5, column=0, sticky="ew")
 
-        # Fill remaining sidebar space so the bottom area never shows window default white.
-        sidebar_fill = tk.Frame(controls, bg=controls.cget("bg"), bd=0, highlightthickness=0)
+        sidebar_fill = tk.Frame(
+            controls,
+            bg=self.colors["sidebar_bg"],
+            bd=0,
+            highlightthickness=0,
+        )
         sidebar_fill.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 8))
 
-        self.right_panel = tk.Frame(main, bg="#efefef")
+        self.right_panel = tk.Frame(main, bg=self.colors["root_bg"])
         self.right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         content = ttk.Panedwindow(self.right_panel, orient=tk.HORIZONTAL)
@@ -318,13 +411,26 @@ class CSVPlotterApp(tk.Tk):
         content.add(chart_frame, weight=2)
 
         ttk.Label(preview_frame, text="Data Preview (first 20 rows)").pack(anchor="w")
-        self.preview_text = tk.Text(preview_frame, wrap=tk.NONE, height=28)
+        self.preview_text = tk.Text(
+            preview_frame,
+            wrap=tk.NONE,
+            height=28,
+            bg=self.colors["axes_bg"],
+            fg=self.colors["text_fg"],
+            insertbackground=self.colors["text_fg"],
+            selectbackground=self.colors["accent"],
+            bd=1,
+            highlightthickness=1,
+            highlightbackground=self.colors["card_border"],
+            relief="flat",
+        )
         self.preview_text.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
 
         self.fig, self.ax = plt.subplots(figsize=(11.5, 7.2), dpi=180, constrained_layout=True)
-        self.fig.patch.set_facecolor("#f8fafc")
-        self.ax.set_facecolor("#ffffff")
+        self.fig.patch.set_facecolor(self.colors["plot_bg"])
+        self.ax.set_facecolor(self.colors["axes_bg"])
         self.canvas = FigureCanvasTkAgg(self.fig, master=chart_frame)
+        self.canvas.get_tk_widget().configure(bg=self.colors["plot_bg"], highlightthickness=0)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self.canvas.mpl_connect("motion_notify_event", self._on_plot_hover)
 
@@ -338,7 +444,7 @@ class CSVPlotterApp(tk.Tk):
                 self.right_panel,
                 highlightthickness=0,
                 bd=0,
-                bg="#d9d9d9",
+                bg=self.colors["axes_bg"],
             )
             self.blur_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
             self.blur_overlay.bind("<Configure>", self._redraw_blur_overlay)
@@ -417,7 +523,7 @@ class CSVPlotterApp(tk.Tk):
             0,
             width,
             height,
-            fill="#f3f3f3",
+            fill="#111a26",
             outline="",
             stipple="gray50",
         )
@@ -426,7 +532,7 @@ class CSVPlotterApp(tk.Tk):
             0,
             width,
             height,
-            fill="#ffffff",
+            fill="#162233",
             outline="",
             stipple="gray25",
         )
@@ -522,6 +628,20 @@ class CSVPlotterApp(tk.Tk):
             return min(7, max(1, data_len))
         window = int(max(1, round(float(num))))
         return min(window, max(1, data_len))
+
+    def _apply_plot_theme(self) -> None:
+        self.fig.patch.set_facecolor(self.colors["plot_bg"])
+
+    def _style_axis(self, axis, x_col: str, y_col: str, title: str) -> None:
+        axis.set_facecolor(self.colors["axes_bg"])
+        axis.set_xlabel(x_col, fontsize=4.5, color=self.colors["plot_text"])
+        axis.set_ylabel(y_col, fontsize=4.5, color=self.colors["plot_text"])
+        axis.set_title(title, fontsize=5, color=self.colors["plot_text"])
+        axis.tick_params(axis="both", labelsize=4, colors=self.colors["plot_text"])
+        for spine in axis.spines.values():
+            spine.set_color(self.colors["spine"])
+        axis.grid(True, alpha=0.45, linestyle="-", linewidth=0.6, color=self.colors["grid"])
+        axis.margins(x=0.02, y=0.08)
 
     def _clear_plot_insights(self) -> None:
         self.hover_point_var.set("X: -- | Y: --")
@@ -834,6 +954,7 @@ class CSVPlotterApp(tk.Tk):
             return
 
         self.fig.clf()
+        self._apply_plot_theme()
         mode = self.plot_mode_var.get()
         colors = plt.cm.tab20(np.linspace(0, 1, max(len(prepared), 2)))
         total_points = int(sum(item["rows"] for item in prepared))
@@ -854,12 +975,7 @@ class CSVPlotterApp(tk.Tk):
                     solid_capstyle="round",
                     solid_joinstyle="round",
                 )
-                ax_i.set_title(item["source"], fontsize=5)
-                ax_i.set_xlabel(x_col, fontsize=4.5)
-                ax_i.set_ylabel(y_col, fontsize=4.5)
-                ax_i.tick_params(axis="both", labelsize=4)
-                ax_i.grid(True, alpha=0.28, linestyle="-", linewidth=0.6)
-                ax_i.margins(x=0.02, y=0.08)
+                self._style_axis(ax_i, x_col, y_col, item["source"])
             for j in range(len(prepared), len(flat_axes)):
                 flat_axes[j].set_visible(False)
             self.ax = flat_axes[0]
@@ -886,14 +1002,16 @@ class CSVPlotterApp(tk.Tk):
                 hover_y_list.append(item["y"])
                 hover_src_list.extend([item["source"]] * len(item["x"]))
 
-            self.ax.set_xlabel(x_col, fontsize=4.5)
-            self.ax.set_ylabel(y_col, fontsize=4.5)
-            self.ax.set_title(f"{y_col} vs {x_col}", fontsize=5)
-            self.ax.tick_params(axis="both", labelsize=4)
-            self.ax.grid(True, alpha=0.28, linestyle="-", linewidth=0.7)
-            self.ax.margins(x=0.02, y=0.08)
+            self._style_axis(self.ax, x_col, y_col, f"{y_col} vs {x_col}")
             if len(prepared) > 1:
-                self.ax.legend(loc="best", fontsize=4, title="Source", title_fontsize=4.2)
+                legend = self.ax.legend(loc="best", fontsize=4, title="Source", title_fontsize=4.2)
+                if legend is not None:
+                    legend.get_frame().set_facecolor(self.colors["axes_bg"])
+                    legend.get_frame().set_edgecolor(self.colors["spine"])
+                    legend.get_frame().set_alpha(0.9)
+                    legend.get_title().set_color(self.colors["plot_text"])
+                    for text in legend.get_texts():
+                        text.set_color(self.colors["plot_text"])
             self.fig.autofmt_xdate()
             self.canvas.draw()
             self._update_hover_cache(
