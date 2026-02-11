@@ -13,6 +13,11 @@ if "seaborn-v0_8-whitegrid" in plt.style.available:
     plt.style.use("seaborn-v0_8-whitegrid")
 plt.rcParams["figure.dpi"] = 160
 plt.rcParams["savefig.dpi"] = 300
+plt.rcParams["font.size"] = 9
+plt.rcParams["axes.titlesize"] = 10
+plt.rcParams["axes.labelsize"] = 9
+plt.rcParams["xtick.labelsize"] = 8
+plt.rcParams["ytick.labelsize"] = 8
 plt.rcParams["lines.antialiased"] = True
 plt.rcParams["path.simplify"] = True
 plt.rcParams["path.simplify_threshold"] = 0.2
@@ -45,7 +50,7 @@ class CSVPlotterApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("CSV Variable Plotter (Desktop)")
-        self.geometry("1200x760")
+        self.geometry("1400x860")
 
         self.df: pd.DataFrame | None = None
         self.blur_overlay: tk.Canvas | None = None
@@ -62,7 +67,6 @@ class CSVPlotterApp(tk.Tk):
         self.smooth_line_var = tk.BooleanVar(value=True)
         self.smooth_window_var = tk.StringVar(value="7")
         self.export_dpi_var = tk.StringVar(value="300")
-        self.chart_type_var = tk.StringVar(value="Line")
         self.status_var = tk.StringVar(value="Select a CSV file to begin.")
 
         self._build_ui()
@@ -114,34 +118,27 @@ class CSVPlotterApp(tk.Tk):
         self.manual_end_entry = ttk.Entry(controls, textvariable=self.manual_end_var, state="disabled")
         self.manual_end_entry.grid(row=12, column=0, sticky="ew", pady=(2, 10))
 
-        ttk.Label(controls, text="Chart").grid(row=13, column=0, sticky="w")
-        self.chart_combo = ttk.Combobox(
-            controls,
-            textvariable=self.chart_type_var,
-            state="readonly",
-            values=["Line", "Scatter"],
-        )
-        self.chart_combo.grid(row=14, column=0, sticky="ew", pady=(2, 10))
+        ttk.Label(controls, text="Chart: Line").grid(row=13, column=0, sticky="w", pady=(0, 10))
 
         ttk.Checkbutton(
             controls,
             text="Smooth line",
             variable=self.smooth_line_var,
-        ).grid(row=15, column=0, sticky="w")
+        ).grid(row=14, column=0, sticky="w")
         ttk.Entry(controls, textvariable=self.smooth_window_var).grid(
-            row=16, column=0, sticky="ew", pady=(2, 10)
+            row=15, column=0, sticky="ew", pady=(2, 10)
         )
 
-        ttk.Label(controls, text="Export DPI").grid(row=17, column=0, sticky="w")
+        ttk.Label(controls, text="Export DPI").grid(row=16, column=0, sticky="w")
         ttk.Entry(controls, textvariable=self.export_dpi_var).grid(
-            row=18, column=0, sticky="ew", pady=(2, 10)
+            row=17, column=0, sticky="ew", pady=(2, 10)
         )
 
         ttk.Button(controls, text="Plot", command=self.plot_data).grid(
-            row=19, column=0, sticky="ew", pady=(6, 6)
+            row=18, column=0, sticky="ew", pady=(6, 6)
         )
         ttk.Button(controls, text="Export Plot PNG", command=self.export_plot).grid(
-            row=20, column=0, sticky="ew", pady=(0, 10)
+            row=19, column=0, sticky="ew", pady=(0, 10)
         )
 
         ttk.Label(controls, textvariable=self.status_var, wraplength=260, justify="left").grid(
@@ -163,7 +160,7 @@ class CSVPlotterApp(tk.Tk):
         self.preview_text = tk.Text(preview_frame, wrap=tk.NONE, height=28)
         self.preview_text.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
 
-        self.fig, self.ax = plt.subplots(figsize=(8.6, 5.8), dpi=180, constrained_layout=True)
+        self.fig, self.ax = plt.subplots(figsize=(11.5, 7.2), dpi=180, constrained_layout=True)
         self.fig.patch.set_facecolor("#f8fafc")
         self.ax.set_facecolor("#ffffff")
         self.canvas = FigureCanvasTkAgg(self.fig, master=chart_frame)
@@ -497,37 +494,27 @@ class CSVPlotterApp(tk.Tk):
             return
 
         self.ax.clear()
-        if self.chart_type_var.get() == "Line":
-            plot_df = plot_df.sort_values(x_col).reset_index(drop=True)
-            y_plot = plot_df[y_col].copy()
-            if self.smooth_line_var.get() and len(plot_df) >= 3:
-                smooth_window = self._get_smooth_window(len(plot_df))
-                if smooth_window >= 2:
-                    y_plot = y_plot.rolling(window=smooth_window, center=True, min_periods=1).mean()
+        plot_df = plot_df.sort_values(x_col).reset_index(drop=True)
+        y_plot = plot_df[y_col].copy()
+        if self.smooth_line_var.get() and len(plot_df) >= 3:
+            smooth_window = self._get_smooth_window(len(plot_df))
+            if smooth_window >= 2:
+                y_plot = y_plot.rolling(window=smooth_window, center=True, min_periods=1).mean()
 
-            self.ax.plot(
-                plot_df[x_col],
-                y_plot,
-                linewidth=2.0,
-                antialiased=True,
-                color="#1f77b4",
-                solid_capstyle="round",
-                solid_joinstyle="round",
-            )
-        else:
-            self.ax.scatter(
-                plot_df[x_col],
-                plot_df[y_col],
-                s=22,
-                alpha=0.85,
-                color="#1f77b4",
-                edgecolors="white",
-                linewidths=0.4,
-            )
+        self.ax.plot(
+            plot_df[x_col],
+            y_plot,
+            linewidth=1.15,
+            antialiased=True,
+            color="#1f77b4",
+            solid_capstyle="round",
+            solid_joinstyle="round",
+        )
 
-        self.ax.set_xlabel(x_col)
-        self.ax.set_ylabel(y_col)
-        self.ax.set_title(f"{y_col} vs {x_col}")
+        self.ax.set_xlabel(x_col, fontsize=9)
+        self.ax.set_ylabel(y_col, fontsize=9)
+        self.ax.set_title(f"{y_col} vs {x_col}", fontsize=10)
+        self.ax.tick_params(axis="both", labelsize=8)
         self.ax.grid(True, alpha=0.28, linestyle="-", linewidth=0.7)
         self.ax.margins(x=0.02, y=0.08)
         self.fig.autofmt_xdate()
