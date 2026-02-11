@@ -15,6 +15,8 @@ A native desktop app (Tkinter + Matplotlib) for plotting two variables from a CS
 - Or choose `Manual Range` and enter `Start X` / `End X`.
   - If Start/End values are not exact matches in CSV, the app rounds to the nearest existing X values.
 - Plot a 2D line or scatter chart inside the app window.
+- Line mode supports smoothing (`Smooth line` + window size).
+- Supports one-click export via `Export Plot PNG` with configurable `Export DPI`.
 - Controls are on the left sidebar.
 - On macOS, when no plot is shown, the right side uses native frosted glass (`NSVisualEffectView`).
 
@@ -35,3 +37,4 @@ python3 app.py
 - `Tkinter` is part of standard Python on most macOS installs.
 - X-period now slices the loaded rows by position, not by specific date values.
 - For native macOS frosted glass, install dependencies from `requirements.txt` (includes `pyobjc-framework-Cocoa` on macOS).
+- Numeric `Time` columns are kept numeric (to avoid accidental `1970` epoch axis conversion).

@@ -9,6 +9,14 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import pandas as pd
 
+if "seaborn-v0_8-whitegrid" in plt.style.available:
+    plt.style.use("seaborn-v0_8-whitegrid")
+plt.rcParams["figure.dpi"] = 160
+plt.rcParams["savefig.dpi"] = 300
+plt.rcParams["lines.antialiased"] = True
+plt.rcParams["path.simplify"] = True
+plt.rcParams["path.simplify_threshold"] = 0.2
+
 HAS_COCOA = sys.platform == "darwin" and importlib.util.find_spec("AppKit") is not None
 
 if HAS_COCOA:
@@ -51,6 +59,9 @@ class CSVPlotterApp(tk.Tk):
         self.x_period_var = tk.StringVar(value="All")
         self.manual_start_var = tk.StringVar()
         self.manual_end_var = tk.StringVar()
+        self.smooth_line_var = tk.BooleanVar(value=True)
+        self.smooth_window_var = tk.StringVar(value="7")
+        self.export_dpi_var = tk.StringVar(value="300")
         self.chart_type_var = tk.StringVar(value="Line")
         self.status_var = tk.StringVar(value="Select a CSV file to begin.")
 
@@ -64,7 +75,7 @@ class CSVPlotterApp(tk.Tk):
         controls.pack(side=tk.LEFT, fill=tk.Y)
         controls.pack_propagate(False)
         controls.grid_columnconfigure(0, weight=1)
-        controls.grid_rowconfigure(14, weight=1)
+        controls.grid_rowconfigure(22, weight=1)
 
         ttk.Button(controls, text="Choose CSV", command=self.load_csv).grid(
             row=0, column=0, sticky="ew", pady=(0, 10)
@@ -112,12 +123,29 @@ class CSVPlotterApp(tk.Tk):
         )
         self.chart_combo.grid(row=14, column=0, sticky="ew", pady=(2, 10))
 
+        ttk.Checkbutton(
+            controls,
+            text="Smooth line",
+            variable=self.smooth_line_var,
+        ).grid(row=15, column=0, sticky="w")
+        ttk.Entry(controls, textvariable=self.smooth_window_var).grid(
+            row=16, column=0, sticky="ew", pady=(2, 10)
+        )
+
+        ttk.Label(controls, text="Export DPI").grid(row=17, column=0, sticky="w")
+        ttk.Entry(controls, textvariable=self.export_dpi_var).grid(
+            row=18, column=0, sticky="ew", pady=(2, 10)
+        )
+
         ttk.Button(controls, text="Plot", command=self.plot_data).grid(
-            row=15, column=0, sticky="ew", pady=(6, 10)
+            row=19, column=0, sticky="ew", pady=(6, 6)
+        )
+        ttk.Button(controls, text="Export Plot PNG", command=self.export_plot).grid(
+            row=20, column=0, sticky="ew", pady=(0, 10)
         )
 
         ttk.Label(controls, textvariable=self.status_var, wraplength=260, justify="left").grid(
-            row=16, column=0, sticky="sw"
+            row=22, column=0, sticky="sw"
         )
 
         self.right_panel = tk.Frame(main, bg="#efefef")
@@ -135,7 +163,9 @@ class CSVPlotterApp(tk.Tk):
         self.preview_text = tk.Text(preview_frame, wrap=tk.NONE, height=28)
         self.preview_text.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
 
-        self.fig, self.ax = plt.subplots(figsize=(7.5, 5.5))
+        self.fig, self.ax = plt.subplots(figsize=(8.6, 5.8), dpi=180, constrained_layout=True)
+        self.fig.patch.set_facecolor("#f8fafc")
+        self.ax.set_facecolor("#ffffff")
         self.canvas = FigureCanvasTkAgg(self.fig, master=chart_frame)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
@@ -307,6 +337,62 @@ class CSVPlotterApp(tk.Tk):
 
         raise ValueError("Manual Range supports numeric or datetime-like X variable only.")
 
+    def _should_parse_x_as_datetime(self, series: pd.Series) -> bool:
+        if pd.api.types.is_datetime64_any_dtype(series):
+            return True
+        if pd.api.types.is_numeric_dtype(series):
+            return False
+
+        sample = series.dropna().astype(str).head(120)
+        if sample.empty:
+            return False
+
+        numeric_like_ratio = sample.str.fullmatch(r"[+-]?\d+(?:\.\d+)?").fillna(False).mean()
+        if numeric_like_ratio >= 0.8:
+            return False
+
+        datetime_hint_ratio = sample.str.contains(r"[-/:T]").fillna(False).mean()
+        return bool(datetime_hint_ratio >= 0.35)
+
+    def _get_smooth_window(self, data_len: int) -> int:
+        raw = self.smooth_window_var.get().strip()
+        num = pd.to_numeric(pd.Series([raw]), errors="coerce").iloc[0]
+        if pd.isna(num):
+            return min(7, max(1, data_len))
+        window = int(max(1, round(float(num))))
+        return min(window, max(1, data_len))
+
+    def _get_export_dpi(self) -> int:
+        raw = self.export_dpi_var.get().strip()
+        num = pd.to_numeric(pd.Series([raw]), errors="coerce").iloc[0]
+        if pd.isna(num):
+            return 300
+        return int(min(1200, max(72, round(float(num)))))
+
+    def export_plot(self) -> None:
+        if not self.has_plot:
+            messagebox.showinfo("No plot", "Please plot data before exporting.")
+            return
+
+        x_name = self.x_var.get().strip() or "x"
+        y_name = self.y_var.get().strip() or "y"
+        safe_x = "".join(ch if ch.isalnum() or ch in "_-" else "_" for ch in x_name)
+        safe_y = "".join(ch if ch.isalnum() or ch in "_-" else "_" for ch in y_name)
+        default_name = f"{safe_y}_vs_{safe_x}.png"
+
+        out_path = filedialog.asksaveasfilename(
+            title="Export plot as PNG",
+            defaultextension=".png",
+            initialfile=default_name,
+            filetypes=[("PNG image", "*.png")],
+        )
+        if not out_path:
+            return
+
+        dpi = self._get_export_dpi()
+        self.fig.savefig(out_path, dpi=dpi, bbox_inches="tight", facecolor=self.fig.get_facecolor())
+        self.status_var.set(f"Saved plot: {out_path} (DPI: {dpi})")
+
     def load_csv(self) -> None:
         file_path = filedialog.askopenfilename(
             title="Select CSV file",
@@ -390,11 +476,17 @@ class CSVPlotterApp(tk.Tk):
             messagebox.showwarning("No rows", "No rows match the selected X period.")
             return
 
-        parsed_x = pd.to_datetime(filtered_df[x_col], errors="coerce")
-        x_parse_ratio = parsed_x.notna().mean() if len(parsed_x) else 0.0
         filtered_df[y_col] = pd.to_numeric(filtered_df[y_col], errors="coerce")
-        if x_parse_ratio >= 0.8:
-            filtered_df[x_col] = parsed_x
+        if self._should_parse_x_as_datetime(filtered_df[x_col]):
+            parsed_x = pd.to_datetime(filtered_df[x_col], errors="coerce")
+            x_parse_ratio = parsed_x.notna().mean() if len(parsed_x) else 0.0
+            if x_parse_ratio >= 0.8:
+                filtered_df[x_col] = parsed_x
+        else:
+            x_numeric = pd.to_numeric(filtered_df[x_col], errors="coerce")
+            x_numeric_ratio = x_numeric.notna().mean() if len(x_numeric) else 0.0
+            if x_numeric_ratio >= 0.8:
+                filtered_df[x_col] = x_numeric
 
         plot_df = filtered_df[[x_col, y_col]].dropna()
         if plot_df.empty:
@@ -406,14 +498,38 @@ class CSVPlotterApp(tk.Tk):
 
         self.ax.clear()
         if self.chart_type_var.get() == "Line":
-            self.ax.plot(plot_df[x_col], plot_df[y_col], linewidth=1.5)
+            plot_df = plot_df.sort_values(x_col).reset_index(drop=True)
+            y_plot = plot_df[y_col].copy()
+            if self.smooth_line_var.get() and len(plot_df) >= 3:
+                smooth_window = self._get_smooth_window(len(plot_df))
+                if smooth_window >= 2:
+                    y_plot = y_plot.rolling(window=smooth_window, center=True, min_periods=1).mean()
+
+            self.ax.plot(
+                plot_df[x_col],
+                y_plot,
+                linewidth=2.0,
+                antialiased=True,
+                color="#1f77b4",
+                solid_capstyle="round",
+                solid_joinstyle="round",
+            )
         else:
-            self.ax.scatter(plot_df[x_col], plot_df[y_col], s=18)
+            self.ax.scatter(
+                plot_df[x_col],
+                plot_df[y_col],
+                s=22,
+                alpha=0.85,
+                color="#1f77b4",
+                edgecolors="white",
+                linewidths=0.4,
+            )
 
         self.ax.set_xlabel(x_col)
         self.ax.set_ylabel(y_col)
         self.ax.set_title(f"{y_col} vs {x_col}")
-        self.ax.grid(True, alpha=0.35)
+        self.ax.grid(True, alpha=0.28, linestyle="-", linewidth=0.7)
+        self.ax.margins(x=0.02, y=0.08)
         self.fig.autofmt_xdate()
         self.canvas.draw_idle()
         self.has_plot = True
