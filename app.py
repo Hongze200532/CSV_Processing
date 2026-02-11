@@ -242,7 +242,8 @@ class CSVPlotterApp(tk.Tk):
         self.native_blur_view.setMaterial_(NSVisualEffectMaterialSidebar)
         self.native_blur_view.setBlendingMode_(NSVisualEffectBlendingModeBehindWindow)
         self.native_blur_view.setState_(NSVisualEffectStateActive)
-        self.native_blur_view.setIgnoresMouseEvents_(True)
+        if hasattr(self.native_blur_view, "setIgnoresMouseEvents_"):
+            self.native_blur_view.setIgnoresMouseEvents_(True)
         self.native_blur_view.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
         content_view.addSubview_(self.native_blur_view)
         self._sync_blur_overlay()
