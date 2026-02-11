@@ -30,7 +30,7 @@ A native desktop app (Tkinter + Matplotlib) for plotting selected variables from
 - Hover on line (overlay mode) to inspect nearest point data in the left panel.
 - Shows global peak values (max/min) with source labels.
 - Controls are on the left sidebar.
-- On macOS, the left sidebar uses native frosted glass (`NSVisualEffectView`); the plotting area remains clear.
+- On macOS, when no plot is shown, the right side uses native frosted glass (`NSVisualEffectView`).
 
 ## Setup
 ```bash
